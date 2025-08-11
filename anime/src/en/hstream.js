@@ -266,4 +266,3 @@ class DefaultExtension extends MProvider {
         ];
     }
 }
-
