@@ -281,7 +281,7 @@ class DefaultExtension extends MProvider {
             listPreference: {
                 title: "Preferred Video Source",
                 summary: "Choose to show stream links, download links, or both.",
-                valueIndex: 0,
+                valueIndex: 1,
                 entries: ["Stream & Download", "Stream Only", "Download Only"],
                 entryValues: ["both", "stream", "download"],
             }
