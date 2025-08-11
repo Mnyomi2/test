@@ -203,9 +203,9 @@ class DefaultExtension extends MProvider {
             };
         });
 
-        // NEW LOGIC: if "enable_feature_x" is true → single quality, else → all qualities
-        const enableSingle = this.getPreference("enable_feature_x") === "true";
-        if (enableSingle) {
+        const showPreferredOnly = this.getPreference("enable_preferred_quality_only") ?? true;
+
+        if (showPreferredOnly) {
             const preferredQuality = this.getPreference("hstream_pref_quality") || "1080p";
             const preferredVideo = videos.find(video => video.quality === preferredQuality);
             if (preferredVideo) {
@@ -213,6 +213,8 @@ class DefaultExtension extends MProvider {
             }
         }
 
+        // If the switch is off, or if the preferred quality wasn't found,
+        // return all available qualities, sorted from highest to lowest.
         videos.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
         return videos;
     }
@@ -256,14 +258,13 @@ class DefaultExtension extends MProvider {
                 }
             },
             {
-                key: "enable_feature_x",
+                key: "enable_preferred_quality_only",
                 switchPreferenceCompat: {
-                    title: "Enable Feature X",
-                    summary: "When enabled, only the selected preferred quality is shown; otherwise, all available qualities are listed.",
-                    value: true
+                    title: "Show Preferred Quality Only",
+                    summary: "If enabled, only shows the selected quality. If disabled, shows all available qualities.",
+                    value: true, // Default value
                 }
             }
         ];
     }
 }
-
