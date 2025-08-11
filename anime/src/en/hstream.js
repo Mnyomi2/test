@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "typeSource": "single",
     "itemType": 1,
     "isNsfw": true,
-    "version": "1.0.0",
+    "version": "1.0.1",
     "pkgPath": "anime/src/en/hstream.js"
 }];
 
@@ -225,3 +225,4 @@ class DefaultExtension extends MProvider {
         }];
     }
 }
+
