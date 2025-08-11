@@ -2,8 +2,8 @@ const mangayomiSources = [{
     "name": "Hstream",
     "id": 3720491820,
     "lang": "en",
-    "baseUrl": "https://hstream.moe",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=hstream.moe",
+    "baseUrl": "https://hstream.moe  ",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=hstream.moe  ",
     "typeSource": "single",
     "itemType": 1,
     "isNsfw": true,
@@ -24,22 +24,38 @@ class DefaultExtension extends MProvider {
     getHeaders(referer = this.source.baseUrl) {
         return {
             "Referer": referer,
-            "Origin": this.source.baseUrl
+            "Origin": this.source.baseUrl.trim()
         };
     }
 
     // Helper function to parse anime from a list element
     _parseAnimeFromElement(element) {
-        const url = element.getHref;
-        const episode = url.substring(url.lastIndexOf("-") + 1, url.lastIndexOf("/"));
-        const name = element.selectFirst("img").attr("alt");
-        const imageUrl = `${this.source.baseUrl}/images${url.substring(0, url.lastIndexOf("-"))}/cover-ep-${episode}.webp`;
-        return { name, imageUrl, link: url };
+        const baseUrl = this.source.baseUrl.trim();
+        const episodeUrl = element.getHref.replace(baseUrl, "");
+        const imgElement = element.selectFirst("img");
+        const fullName = imgElement.attr("alt");
+
+        const seriesName = fullName.replace(/\s*-\s*\d+$/, '').trim();
+
+        const seriesLink = episodeUrl
+            .replace(/\/$/, '')
+            .replace(/-[0-9]+$/, '');
+
+        let imageRelativeSrc = imgElement.getSrc;
+        if (imageRelativeSrc.includes("gallery-ep-")) {
+            imageRelativeSrc = imageRelativeSrc
+                .replace("/gallery-ep-", "/cover-ep-")
+                .replace(/-[0-9]+-thumbnail\.webp$/, ".webp");
+        }
+        const imageUrl = baseUrl + imageRelativeSrc;
+        
+        return { name: seriesName, imageUrl, link: seriesLink };
     }
 
     // Helper to fetch and parse a page of anime
     async _getAnimePage(path) {
-        const res = await this.client.get(this.source.baseUrl + path, this.getHeaders());
+        const baseUrl = this.source.baseUrl.trim();
+        const res = await this.client.get(baseUrl + path, this.getHeaders());
         const doc = new Document(res.body);
         const list = doc.select("div.items-center div.w-full > a").map(el => this._parseAnimeFromElement(el));
         const hasNextPage = !!doc.selectFirst("span[aria-current] + a");
@@ -55,26 +71,23 @@ class DefaultExtension extends MProvider {
     }
 
     async search(query, page, filters) {
+        const baseUrl = this.source.baseUrl.trim();
         const getCheckBoxValues = (state) => state.filter(i => i.state).map(i => i.value);
         const getSelectValue = (filter) => filter.values[filter.state].value;
-
-        let url = `${this.source.baseUrl}/search?page=${page}`;
+        let url = `${baseUrl}/search?page=${page}`;
         if (query) {
             url += `&search=${encodeURIComponent(query)}`;
         }
-
         if (filters && filters.length > 0) {
             const order = getSelectValue(filters[0]);
             const includedGenres = getCheckBoxValues(filters[1].state);
             const excludedGenres = getCheckBoxValues(filters[2].state);
             const studios = getCheckBoxValues(filters[3].state);
-
             url += `&order=${order}`;
             includedGenres.forEach(g => url += `&tags[]=${g}`);
             excludedGenres.forEach(g => url += `&blacklist[]=${g}`);
             studios.forEach(s => url += `&studios[]=${s}`);
         }
-
         const res = await this.client.get(url, this.getHeaders());
         const doc = new Document(res.body);
         const list = doc.select("div.items-center div.w-full > a").map(el => this._parseAnimeFromElement(el));
@@ -83,35 +96,27 @@ class DefaultExtension extends MProvider {
     }
 
     async getDetail(url) {
-        const res = await this.client.get(this.source.baseUrl + url, this.getHeaders());
+        const baseUrl = this.source.baseUrl.trim();
+        const seriesPageUrl = baseUrl + url;
+        const res = await this.client.get(seriesPageUrl, this.getHeaders());
         const doc = new Document(res.body);
 
-        const floatleft = doc.selectFirst("div.relative > div.justify-between > div");
-        const name = floatleft.selectFirst("div > h1").text;
-        const imageUrl = doc.selectFirst("div.float-left > img.object-cover")?.getSrc;
-        const genre = doc.select("ul.list-none > li > a").map(el => el.text);
-        const description = doc.selectFirst("div.relative > p.leading-tight")?.text;
-        const status = 1; // Completed
+        const detailBlock = doc.selectFirst("div.bg-white.dark\\:bg-neutral-800.p-5");
+        const name = detailBlock.selectFirst("h1").text.trim();
+        let imageUrl = detailBlock.selectFirst("div.float-left img")?.getSrc;
+        if (imageUrl && !imageUrl.startsWith("http")) {
+            imageUrl = baseUrl + imageUrl;
+        }
+        const description = detailBlock.selectFirst("p.font-bold:contains(Description) + p")?.text.trim();
+        const genre = detailBlock.select("ul.list-none > li > a").map(el => el.text.trim());
+        const status = 1;
 
-        const toDate = (dateStr) => {
-            if (!dateStr) return "0";
-            try {
-                return new Date(dateStr.trim()).getTime().toString();
-            } catch (e) {
-                return "0";
-            }
-        };
-
-        const dateUploadStr = doc.selectFirst("a:has(i.fa-upload)")?.text.replace(/\|/g, "");
-        const dateUpload = toDate(dateUploadStr);
-
-        const epNumStr = url.substring(url.lastIndexOf("-") + 1, url.lastIndexOf("/"));
-        
-        const chapters = [{
-            name: `Episode ${epNumStr}`,
-            url: url,
-            dateUpload: dateUpload
-        }];
+        const chapterElements = doc.select("a:contains(Episodes) + div.grid > div > a");
+        const chapters = chapterElements.map(el => {
+            const episodeUrl = el.getHref.replace(baseUrl, "");
+            const episodeName = el.selectFirst("img").attr("alt").trim();
+            return { name: episodeName, url: episodeUrl };
+        });
 
         return {
             name,
@@ -119,50 +124,37 @@ class DefaultExtension extends MProvider {
             description,
             genre,
             status,
-            chapters,
-            link: this.source.baseUrl + url
+            chapters: chapters.reverse(),
+            link: seriesPageUrl
         };
     }
 
     async getVideoList(url) {
-        const episodePageUrl = this.source.baseUrl + url;
-        const res = await this.client.get(episodePageUrl, this.getHeaders());
+        const baseUrl = this.source.baseUrl.trim();
+        const episodePageUrl = baseUrl + url;
+
+        // Step 1: Get the HTML of the episode page.
+        const res = await this.client.get(episodePageUrl, this.getHeaders(episodePageUrl));
         const doc = new Document(res.body);
 
-        const csrfToken = doc.selectFirst('meta[name="csrf-token"]').attr("content");
-        const episodeId = doc.selectFirst("input#e_id").attr("value");
-
-        const playerApiUrl = `${this.source.baseUrl}/player/api`;
-        const headers = {
-            "Referer": episodePageUrl,
-            "Origin": this.source.baseUrl,
-            "X-Requested-With": "XMLHttpRequest",
-            "X-CSRF-TOKEN": csrfToken,
-            "Content-Type": "application/json;charset=UTF-8"
-        };
-        const payload = JSON.stringify({ "episode_id": episodeId });
-
-        const apiRes = await this.client.post(playerApiUrl, headers, payload);
-        const data = JSON.parse(apiRes.body);
-
-        const urlBase = data.stream_domains[0] + "/" + data.stream_url;
-        const subtitles = [{ file: `${urlBase}/eng.ass`, label: "English" }];
-
-        const getVideoUrlPath = (isLegacy, resolution) => {
-            if (isLegacy) {
-                return resolution === "720" ? "/x264.720p.mp4" : `/av1.${resolution}.webm`;
-            } else {
-                return `/${resolution}/manifest.mpd`;
-            }
-        };
-
-        const resolutions = ["720", "1080"];
-        if (data.resolution === "4k") {
-            resolutions.push("2160");
+        // Step 2: Find the subtitle link. This is our key to building the video URLs.
+        const subtitleLinkElement = doc.selectFirst('a[href$="/eng.ass"]');
+        if (!subtitleLinkElement) {
+            throw new Error("Could not find the subtitle link on the page. Video sources cannot be constructed.");
         }
+        const subtitleUrl = subtitleLinkElement.getHref;
+
+        // Step 3: Create the base URL for videos by removing '/eng.ass' from the subtitle link.
+        const urlBase = subtitleUrl.replace('/eng.ass', '');
+        
+        const subtitles = [{ file: subtitleUrl, label: "English" }];
+
+        // Step 4: Assume standard resolutions are available and construct the manifest URLs.
+        // We include 2160p (4k) as it's common on the site.
+        const resolutions = ["720", "1080", "2160"];
 
         let videos = resolutions.map(res => {
-            const videoUrl = urlBase + getVideoUrlPath(data.legacy !== 0, res);
+            const videoUrl = `${urlBase}/${res}/manifest.mpd`;
             return {
                 url: videoUrl,
                 originalUrl: videoUrl,
@@ -171,6 +163,7 @@ class DefaultExtension extends MProvider {
             };
         });
 
+        // Step 5: Sort the videos based on user preference and then by quality descending.
         const preferredQuality = this.getPreference("hstream_pref_quality") || "720p";
         videos.sort((a, b) => {
             const aIsPreferred = a.quality.includes(preferredQuality);
@@ -189,11 +182,9 @@ class DefaultExtension extends MProvider {
     getFilterList() {
         const g = (name, value) => ({ type_name: "CheckBox", name, value });
         const f = (name, value) => ({ type_name: "SelectOption", name, value });
-
         const genres = [
             g("3D", "3d"), g("4K", "4k"), g("X-Ray", "x-ray"), g("Yuri", "yuri"),
         ].sort((a,b) => a.name.localeCompare(b.name));
-
         const studios = [
             g("BOMB! CUTE! BOMB!", "bomb-cute-bomb"), g("BreakBottle", "breakbottle"), g("ChiChinoya", "chichinoya"),
             g("ChuChu", "chuchu"), g("Circle Tribute", "circle-tribute"), g("Collaboration Works", "collaboration-works"),
@@ -209,12 +200,10 @@ class DefaultExtension extends MProvider {
             g("Suiseisha", "suiseisha"), g("Suzuki Mirano", "suzuki-mirano"), g("T-Rex", "t-rex"), g("Toranoana", "toranoana"),
             g("Union Cho", "union-cho"), g("Valkyria", "valkyria"), g("White Bear", "white-bear"), g("ZIZ", "ziz"),
         ].sort((a,b) => a.name.localeCompare(b.name));
-
         const orders = [
             f("View Count", "view-count"), f("A-Z", "az"), f("Z-A", "za"), f("Recently Uploaded", "recently-uploaded"),
             f("Recently Released", "recently-released"), f("Oldest Uploads", "oldest-uploads"), f("Oldest Releases", "oldest-releases"),
         ];
-
         return [
             { type_name: "SelectFilter", name: "Order by", state: 0, values: orders },
             { type_name: "GroupFilter", name: "Include Genres", state: genres },
