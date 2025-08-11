@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=ak.sv",
     "typeSource": "single",
     "itemType": 1,
-    "version": "1.0.6",
+    "version": "1.0.7",
     "pkgPath": "anime/src/ar/akwam.js"
 }];
 
