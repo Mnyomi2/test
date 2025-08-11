@@ -2,14 +2,62 @@ const mangayomiSources = [{
     "name": "Hstream",
     "id": 3720491820,
     "lang": "en",
-    "baseUrl": "https://hstream.moe  ",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=hstream.moe  ",
+    "baseUrl": "https://hstream.moe",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=hstream.moe",
     "typeSource": "single",
     "itemType": 1,
     "isNsfw": true,
     "version": "1.0.4",
     "pkgPath": "anime/src/en/hstream.js"
 }];
+
+// ------------  NEW CONSTANTS  ------------
+const GENRES = [
+    ["3D", "3d"], ["4K", "4k"], ["Ahegao", "ahegao"], ["Anal", "anal"], ["Bdsm", "bdsm"],
+    ["Big Boobs", "big-boobs"], ["Blow Job", "blow-job"], ["Bondage", "bondage"], ["Boob Job", "boob-job"],
+    ["Censored", "censored"], ["Comedy", "comedy"], ["Cosplay", "cosplay"], ["Creampie", "creampie"],
+    ["Dark Skin", "dark-skin"], ["Elf", "elf"], ["Facial", "facial"], ["Fantasy", "fantasy"],
+    ["Filmed", "filmed"], ["Foot Job", "foot-job"], ["Futanari", "futanari"], ["Gangbang", "gangbang"],
+    ["Glasses", "glasses"], ["Hand Job", "hand-job"], ["Harem", "harem"], ["Horror", "horror"],
+    ["Incest", "incest"], ["Inflation", "inflation"], ["Lactation", "lactation"], ["Loli", "loli"],
+    ["Maid", "maid"], ["Masturbation", "masturbation"], ["Milf", "milf"], ["Mind Break", "mind-break"],
+    ["Mind Control", "mind-control"], ["Monster", "monster"], ["Nekomimi", "nekomimi"], ["Ntr", "ntr"],
+    ["Nurse", "nurse"], ["Orgy", "orgy"], ["Pov", "pov"], ["Pregnant", "pregnant"],
+    ["Public Sex", "public-sex"], ["Rape", "rape"], ["Reverse Rape", "reverse-rape"], ["Rimjob", "rimjob"],
+    ["Scat", "scat"], ["School Girl", "school-girl"], ["Shota", "shota"], ["Small Boobs", "small-boobs"],
+    ["Succubus", "succubus"], ["Swim Suit", "swim-suit"], ["Teacher", "teacher"], ["Tentacle", "tentacle"],
+    ["Threesome", "threesome"], ["Toys", "toys"], ["Trap", "trap"], ["Tsundere", "tsundere"],
+    ["Ugly Bastard", "ugly-bastard"], ["Uncensored", "uncensored"], ["Vanilla", "vanilla"], ["Virgin", "virgin"],
+    ["X-Ray", "x-ray"], ["Yuri", "yuri"]
+];
+
+const STUDIOS = [
+    ["BOMB! CUTE! BOMB!", "bomb-cute-bomb"], ["BreakBottle", "breakbottle"], ["ChiChinoya", "chichinoya"],
+    ["ChuChu", "chuchu"], ["Circle Tribute", "circle-tribute"], ["Collaboration Works", "collaboration-works"],
+    ["Digital Works", "digital-works"], ["Discovery", "discovery"], ["Edge", "edge"],
+    ["Gold Bear", "gold-bear"], ["Green Bunny", "green-bunny"], ["Himajin Planning", "himajin-planning"],
+    ["King Bee", "king-bee"], ["L.", "l"], ["Lune Pictures", "lune-pictures"], ["MS Pictures", "ms-pictures"],
+    ["Majin", "majin"], ["Mary Jane", "mary-jane"], ["Mediabank", "mediabank"],
+    ["Mousou Senka", "mousou-senka"], ["Natural High", "natural-high"], ["Nihikime no Dozeu", "nihikime-no-dozeu"],
+    ["Nur", "nur"], ["Pashmina", "pashmina"], ["Peak Hunt", "peak-hunt"], ["Pink Pineapple", "pink-pineapple"],
+    ["Pixy Soft", "pixy-soft"], ["Pixy", "pixy"], ["PoRO", "poro"], ["Queen Bee", "queen-bee"],
+    ["Rabbit Gate", "rabbit-gate"], ["SELFISH", "selfish"], ["Seven", "seven"], ["Showten", "showten"],
+    ["Studio 1st", "studio-1st"], ["Studio Eromatick", "studio-eromatick"], ["Studio Fantasia", "studio-fantasia"],
+    ["Suiseisha", "suiseisha"], ["Suzuki Mirano", "suzuki-mirano"], ["T-Rex", "t-rex"],
+    ["Toranoana", "toranoana"], ["Union Cho", "union-cho"], ["Valkyria", "valkyria"],
+    ["White Bear", "white-bear"], ["ZIZ", "ziz"]
+];
+
+const ORDERS = [
+    ["View Count", "view-count"],
+    ["A-Z", "az"],
+    ["Z-A", "za"],
+    ["Recently Uploaded", "recently-uploaded"],
+    ["Recently Released", "recently-released"],
+    ["Oldest Uploads", "oldest-uploads"],
+    ["Oldest Releases", "oldest-releases"]
+];
+// -----------------------------------------
 
 class DefaultExtension extends MProvider {
     constructor() {
@@ -21,10 +69,8 @@ class DefaultExtension extends MProvider {
         return new SharedPreferences().get(key);
     }
 
-    // Returns the override URL from preferences if set, otherwise the default.
     getBaseUrl() {
         const overrideUrl = this.getPreference("override_base_url");
-        // Trim both the override and the default source URL to handle extra spaces.
         return (overrideUrl || "").trim() || this.source.baseUrl.trim();
     }
 
@@ -36,19 +82,15 @@ class DefaultExtension extends MProvider {
         };
     }
 
-    // Helper function to parse anime from a list element
     _parseAnimeFromElement(element) {
         const baseUrl = this.getBaseUrl();
         const episodeUrl = element.getHref.replace(baseUrl, "");
         const imgElement = element.selectFirst("img");
         const fullName = imgElement.attr("alt");
-
         const seriesName = fullName.replace(/\s*-\s*\d+$/, '').trim();
-
         const seriesLink = episodeUrl
             .replace(/\/$/, '')
             .replace(/-[0-9]+$/, '');
-
         let imageRelativeSrc = imgElement.getSrc;
         if (imageRelativeSrc.includes("gallery-ep-")) {
             imageRelativeSrc = imageRelativeSrc
@@ -56,11 +98,9 @@ class DefaultExtension extends MProvider {
                 .replace(/-[0-9]+-thumbnail\.webp$/, ".webp");
         }
         const imageUrl = baseUrl + imageRelativeSrc;
-        
         return { name: seriesName, imageUrl, link: seriesLink };
     }
 
-    // Helper to fetch and parse a page of anime
     async _getAnimePage(path) {
         const baseUrl = this.getBaseUrl();
         const res = await this.client.get(baseUrl + path, this.getHeaders());
@@ -138,12 +178,9 @@ class DefaultExtension extends MProvider {
     }
 
     async getVideoList(url) {
-        // --- FIX: Create a new Client for each request to ensure a clean session ---
         const client = new Client();
         const baseUrl = this.getBaseUrl();
         const episodePageUrl = baseUrl + url;
-
-        // Use the new, local client instance for this request.
         const res = await client.get(episodePageUrl, this.getHeaders(episodePageUrl));
         const doc = new Document(res.body);
 
@@ -152,13 +189,10 @@ class DefaultExtension extends MProvider {
             throw new Error("Could not find the subtitle link on the page. Video sources cannot be constructed.");
         }
         const subtitleUrl = subtitleLinkElement.getHref;
-
         const urlBase = subtitleUrl.replace('/eng.ass', '');
-        
         const subtitles = [{ file: subtitleUrl, label: "English" }];
 
         const resolutions = ["720", "1080", "2160"];
-
         let videos = resolutions.map(res => {
             const videoUrl = `${urlBase}/${res}/manifest.mpd`;
             return {
@@ -169,12 +203,14 @@ class DefaultExtension extends MProvider {
             };
         });
 
-        const preferredQuality = this.getPreference("hstream_pref_quality") || "720p";
-
-        const preferredVideo = videos.find(video => video.quality === preferredQuality);
-
-        if (preferredVideo) {
-            return [preferredVideo];
+        // NEW LOGIC: if "enable_feature_x" is true → single quality, else → all qualities
+        const enableSingle = this.getPreference("enable_feature_x") === "true";
+        if (enableSingle) {
+            const preferredQuality = this.getPreference("hstream_pref_quality") || "1080p";
+            const preferredVideo = videos.find(video => video.quality === preferredQuality);
+            if (preferredVideo) {
+                return [preferredVideo];
+            }
         }
 
         videos.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
@@ -184,33 +220,16 @@ class DefaultExtension extends MProvider {
     getFilterList() {
         const g = (name, value) => ({ type_name: "CheckBox", name, value });
         const f = (name, value) => ({ type_name: "SelectOption", name, value });
-        const genres = [
-            g("3D", "3d"), g("4K", "4k"), g("X-Ray", "x-ray"), g("Yuri", "yuri"),
-        ].sort((a,b) => a.name.localeCompare(b.name));
-        const studios = [
-            g("BOMB! CUTE! BOMB!", "bomb-cute-bomb"), g("BreakBottle", "breakbottle"), g("ChiChinoya", "chichinoya"),
-            g("ChuChu", "chuchu"), g("Circle Tribute", "circle-tribute"), g("Collaboration Works", "collaboration-works"),
-            g("Digital Works", "digital-works"), g("Discovery", "discovery"), g("Edge", "edge"), g("Gold Bear", "gold-bear"),
-            g("Green Bunny", "green-bunny"), g("Himajin Planning", "himajin-planning"), g("King Bee", "king-bee"),
-            g("L.", "l"), g("Lune Pictures", "lune-pictures"), g("MS Pictures", "ms-pictures"), g("Majin", "majin"),
-            g("Mary Jane", "mary-jane"), g("Mediabank", "mediabank"), g("Mousou Senka", "mousou-senka"),
-            g("Natural High", "natural-high"), g("Nihikime no Dozeu", "nihikime-no-dozeu"), g("Nur", "nur"),
-            g("Pashmina", "pashmina"), g("Peak Hunt", "peak-hunt"), g("Pink Pineapple", "pink-pineapple"),
-            g("Pixy Soft", "pixy-soft"), g("Pixy", "pixy"), g("PoRO", "poro"), g("Queen Bee", "queen-bee"),
-            g("Rabbit Gate", "rabbit-gate"), g("SELFISH", "selfish"), g("Seven", "seven"), g("Showten", "showten"),
-            g("Studio 1st", "studio-1st"), g("Studio Eromatick", "studio-eromatick"), g("Studio Fantasia", "studio-fantasia"),
-            g("Suiseisha", "suiseisha"), g("Suzuki Mirano", "suzuki-mirano"), g("T-Rex", "t-rex"), g("Toranoana", "toranoana"),
-            g("Union Cho", "union-cho"), g("Valkyria", "valkyria"), g("White Bear", "white-bear"), g("ZIZ", "ziz"),
-        ].sort((a,b) => a.name.localeCompare(b.name));
-        const orders = [
-            f("View Count", "view-count"), f("A-Z", "az"), f("Z-A", "za"), f("Recently Uploaded", "recently-uploaded"),
-            f("Recently Released", "recently-released"), f("Oldest Uploads", "oldest-uploads"), f("Oldest Releases", "oldest-releases"),
-        ];
+
+        const genres = GENRES.map(([name, value]) => g(name, value));
+        const studios = STUDIOS.map(([name, value]) => g(name, value));
+        const orders = ORDERS.map(([name, value]) => f(name, value));
+
         return [
             { type_name: "SelectFilter", name: "Order by", state: 0, values: orders },
             { type_name: "GroupFilter", name: "Include Genres", state: genres },
             { type_name: "GroupFilter", name: "Exclude Genres (Blacklist)", state: genres },
-            { type_name: "GroupFilter", name: "Studios", state: studios },
+            { type_name: "GroupFilter", name: "Studios", state: studios }
         ];
     }
 
@@ -223,7 +242,7 @@ class DefaultExtension extends MProvider {
                     summary: "Use a different mirror/domain for the source. Requires app restart.",
                     value: this.source.baseUrl.trim(),
                     dialogTitle: "Enter new Base URL",
-                    dialogMessage: `Default: ${this.source.baseUrl.trim()}`,
+                    dialogMessage: `Default: ${this.source.baseUrl.trim()}`
                 }
             },
             {
@@ -231,9 +250,17 @@ class DefaultExtension extends MProvider {
                 listPreference: {
                     title: "Preferred quality",
                     summary: "Note: Not all videos have all qualities available.",
-                    valueIndex: 0, // Default to the first option, 720p
+                    valueIndex: 0,
                     entries: ["720p (HD)", "1080p (FULLHD)", "2160p (4K)"],
-                    entryValues: ["720p", "1080p", "2160p"],
+                    entryValues: ["720p", "1080p", "2160p"]
+                }
+            },
+            {
+                key: "enable_feature_x",
+                switchPreferenceCompat: {
+                    title: "Enable Feature X",
+                    summary: "When enabled, only the selected preferred quality is shown; otherwise, all available qualities are listed.",
+                    value: true
                 }
             }
         ];
