@@ -137,10 +137,8 @@ class DefaultExtension extends MProvider {
                 const originalName = element.text;
                 let finalName = originalName;
 
-                // Try to parse the episode number from a title like "حلقة 1 : مسلسل..."
                 const match = originalName.match(/حلقة\s*(\d+)/);
                 if (match && match[1]) {
-                    // Format as "الحلقة : 1" (Episode : 1)
                     finalName = `الحلقة : ${match[1]}`;
                 }
 
@@ -154,9 +152,6 @@ class DefaultExtension extends MProvider {
         return { author, description, status, link: url, chapters };
     }
     
-    // return { name, genre: genres, author, description, status, link: url, chapters };
-
-    // FIXED: Added preference to filter stream/download links.
     async getVideoList(url) {
         const videos = [];
         const initialDoc = await this.requestDoc(url);
@@ -221,7 +216,7 @@ class DefaultExtension extends MProvider {
         }
 
         if (videos.length === 0) {
-            throw new Error("No video sources found for the selected type. The website structure might have changed.");
+            throw new Error("لم يتم العثور على مصادر فيديو للنوع المحدد. ربما تغير هيكل الموقع.");
         }
 
         const preferredQuality = this.getPreference("preferred_quality");
@@ -265,31 +260,30 @@ class DefaultExtension extends MProvider {
         ];
     }
     
-    // FIXED: Added URL override and Stream/Download choice.
     getSourcePreferences() {
         return [{
             key: "override_base_url",
             editTextPreference: {
-                title: "Override Base URL",
-                summary: "Use a different mirror/domain for the source",
+                title: "تجاوز الرابط الأساسي",
+                summary: "استخدام رابط/نطاق مختلف للمصدر",
                 value: this.source.baseUrl,
-                dialogTitle: "Enter new Base URL",
-                dialogMessage: `Default: ${this.source.baseUrl}`,
+                dialogTitle: "أدخل الرابط الأساسي الجديد",
+                dialogMessage: `الافتراضي: ${this.source.baseUrl}`,
             }
         }, {
             key: "video_source_type",
             listPreference: {
-                title: "Preferred Video Source",
-                summary: "Choose to show stream links, download links, or both.",
+                title: "مصدر الفيديو المفضل",
+                summary: "اختر بين إظهار روابط المشاهدة أو التحميل أو كليهما.",
                 valueIndex: 0,
-                entries: ["Stream & Download", "Stream Only", "Download Only"],
+                entries: ["مشاهدة وتحميل", "مشاهدة فقط", "تحميل فقط"],
                 entryValues: ["both", "stream", "download"],
             }
         }, {
             key: "preferred_quality",
             listPreference: {
-                title: "Preferred quality",
-                summary: "This will be prioritized in the video list.",
+                title: "الجودة المفضلة",
+                summary: "سيتم إعطاء الأولوية لهذه الجودة في قائمة الفيديوهات.",
                 valueIndex: 0,
                 entries: ["1080p", "720p", "480p", "360p", "240p"],
                 entryValues: ["1080", "720", "480", "360", "240"],
