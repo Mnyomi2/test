@@ -250,7 +250,7 @@ class DefaultExtension extends MProvider {
                 listPreference: {
                     title: "Preferred quality",
                     summary: "Note: Not all videos have all qualities available.",
-                    valueIndex: 0,
+                    valueIndex: 1,
                     entries: ["720p (HD)", "1080p (FULLHD)", "2160p (4K)"],
                     entryValues: ["720p", "1080p", "2160p"]
                 }
@@ -266,3 +266,4 @@ class DefaultExtension extends MProvider {
         ];
     }
 }
+
