@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "typeSource": "single",
     "itemType": 1,
     "isNsfw": true,
-    "version": "1.0.1",
+    "version": "1.0.4",
     "pkgPath": "anime/src/en/hstream.js"
 }];
 
@@ -21,16 +21,24 @@ class DefaultExtension extends MProvider {
         return new SharedPreferences().get(key);
     }
 
-    getHeaders(referer = this.source.baseUrl) {
+    // Returns the override URL from preferences if set, otherwise the default.
+    getBaseUrl() {
+        const overrideUrl = this.getPreference("override_base_url");
+        // Trim both the override and the default source URL to handle extra spaces.
+        return (overrideUrl || "").trim() || this.source.baseUrl.trim();
+    }
+
+    getHeaders(referer) {
+        const baseUrl = this.getBaseUrl();
         return {
-            "Referer": referer,
-            "Origin": this.source.baseUrl.trim()
+            "Referer": referer || baseUrl,
+            "Origin": baseUrl
         };
     }
 
     // Helper function to parse anime from a list element
     _parseAnimeFromElement(element) {
-        const baseUrl = this.source.baseUrl.trim();
+        const baseUrl = this.getBaseUrl();
         const episodeUrl = element.getHref.replace(baseUrl, "");
         const imgElement = element.selectFirst("img");
         const fullName = imgElement.attr("alt");
@@ -54,7 +62,7 @@ class DefaultExtension extends MProvider {
 
     // Helper to fetch and parse a page of anime
     async _getAnimePage(path) {
-        const baseUrl = this.source.baseUrl.trim();
+        const baseUrl = this.getBaseUrl();
         const res = await this.client.get(baseUrl + path, this.getHeaders());
         const doc = new Document(res.body);
         const list = doc.select("div.items-center div.w-full > a").map(el => this._parseAnimeFromElement(el));
@@ -71,7 +79,7 @@ class DefaultExtension extends MProvider {
     }
 
     async search(query, page, filters) {
-        const baseUrl = this.source.baseUrl.trim();
+        const baseUrl = this.getBaseUrl();
         const getCheckBoxValues = (state) => state.filter(i => i.state).map(i => i.value);
         const getSelectValue = (filter) => filter.values[filter.state].value;
         let url = `${baseUrl}/search?page=${page}`;
@@ -96,7 +104,7 @@ class DefaultExtension extends MProvider {
     }
 
     async getDetail(url) {
-        const baseUrl = this.source.baseUrl.trim();
+        const baseUrl = this.getBaseUrl();
         const seriesPageUrl = baseUrl + url;
         const res = await this.client.get(seriesPageUrl, this.getHeaders());
         const doc = new Document(res.body);
@@ -130,27 +138,25 @@ class DefaultExtension extends MProvider {
     }
 
     async getVideoList(url) {
-        const baseUrl = this.source.baseUrl.trim();
+        // --- FIX: Create a new Client for each request to ensure a clean session ---
+        const client = new Client();
+        const baseUrl = this.getBaseUrl();
         const episodePageUrl = baseUrl + url;
 
-        // Step 1: Get the HTML of the episode page.
-        const res = await this.client.get(episodePageUrl, this.getHeaders(episodePageUrl));
+        // Use the new, local client instance for this request.
+        const res = await client.get(episodePageUrl, this.getHeaders(episodePageUrl));
         const doc = new Document(res.body);
 
-        // Step 2: Find the subtitle link. This is our key to building the video URLs.
         const subtitleLinkElement = doc.selectFirst('a[href$="/eng.ass"]');
         if (!subtitleLinkElement) {
             throw new Error("Could not find the subtitle link on the page. Video sources cannot be constructed.");
         }
         const subtitleUrl = subtitleLinkElement.getHref;
 
-        // Step 3: Create the base URL for videos by removing '/eng.ass' from the subtitle link.
         const urlBase = subtitleUrl.replace('/eng.ass', '');
         
         const subtitles = [{ file: subtitleUrl, label: "English" }];
 
-        // Step 4: Assume standard resolutions are available and construct the manifest URLs.
-        // We include 2160p (4k) as it's common on the site.
         const resolutions = ["720", "1080", "2160"];
 
         let videos = resolutions.map(res => {
@@ -163,19 +169,15 @@ class DefaultExtension extends MProvider {
             };
         });
 
-        // Step 5: Sort the videos based on user preference and then by quality descending.
         const preferredQuality = this.getPreference("hstream_pref_quality") || "720p";
-        videos.sort((a, b) => {
-            const aIsPreferred = a.quality.includes(preferredQuality);
-            const bIsPreferred = b.quality.includes(preferredQuality);
-            if (aIsPreferred && !bIsPreferred) return -1;
-            if (!aIsPreferred && bIsPreferred) return 1;
 
-            const aRes = parseInt(a.quality);
-            const bRes = parseInt(b.quality);
-            return bRes - aRes;
-        });
+        const preferredVideo = videos.find(video => video.quality === preferredQuality);
 
+        if (preferredVideo) {
+            return [preferredVideo];
+        }
+
+        videos.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
         return videos;
     }
 
@@ -213,16 +215,27 @@ class DefaultExtension extends MProvider {
     }
 
     getSourcePreferences() {
-        return [{
-            key: "hstream_pref_quality",
-            listPreference: {
-                title: "Preferred quality",
-                summary: "Note: Not all videos have all qualities available.",
-                valueIndex: 0,
-                entries: ["720p (HD)", "1080p (FULLHD)", "2160p (4K)"],
-                entryValues: ["720p", "1080p", "2160p"],
+        return [
+            {
+                key: "override_base_url",
+                editTextPreference: {
+                    title: "Override Base URL",
+                    summary: "Use a different mirror/domain for the source. Requires app restart.",
+                    value: this.source.baseUrl.trim(),
+                    dialogTitle: "Enter new Base URL",
+                    dialogMessage: `Default: ${this.source.baseUrl.trim()}`,
+                }
+            },
+            {
+                key: "hstream_pref_quality",
+                listPreference: {
+                    title: "Preferred quality",
+                    summary: "Note: Not all videos have all qualities available.",
+                    valueIndex: 0, // Default to the first option, 720p
+                    entries: ["720p (HD)", "1080p (FULLHD)", "2160p (4K)"],
+                    entryValues: ["720p", "1080p", "2160p"],
+                }
             }
-        }];
+        ];
     }
 }
-
