@@ -44,6 +44,28 @@
         "notes": ""
     },
     {
+        "name": "سيما ليك",
+        "id": 5798993892749847,
+        "baseUrl": "https://m.cimaleek.to",
+        "lang": "ar",
+        "typeSource": "single",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=m.cimaleek.to",
+        "dateFormat": "",
+        "dateFormatLocale": "",
+        "isNsfw": false,
+        "hasCloudflare": false,
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/cimaleek.js",
+        "apiUrl": "",
+        "version": "1.0.0",
+        "isManga": false,
+        "itemType": 1,
+        "isFullData": false,
+        "appMinVerReq": "0.5.0",
+        "additionalParams": "",
+        "sourceCodeLanguage": 1,
+        "notes": ""
+    },
+    {
         "name": "WitAnime",
         "id": 984372845,
         "baseUrl": "https://witanime.com",
@@ -100,7 +122,7 @@
         "hasCloudflare": false,
         "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/en/hstream.js",
         "apiUrl": "",
-        "version": "1.0.4",
+        "version": "1.0.0",
         "isManga": false,
         "itemType": 1,
         "isFullData": false,
@@ -109,6 +131,4 @@
         "sourceCodeLanguage": 1,
         "notes": ""
     }
-
 ]
-
