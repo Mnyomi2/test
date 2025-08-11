@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=ak.sv",
     "typeSource": "single",
     "itemType": 1,
-    "version": "1.0.0",
+    "version": "1.0.6",
     "pkgPath": "anime/src/ar/akwam.js"
 }];
 
@@ -20,8 +20,9 @@ class DefaultExtension extends MProvider {
         return new SharedPreferences().get(key);
     }
 
+    // FIXED: Use overrideable Base URL from preferences.
     getBaseUrl() {
-        return this.source.baseUrl;
+        return this.getPreference("override_base_url") || this.source.baseUrl;
     }
 
     getHeaders(referer) {
@@ -35,13 +36,18 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(url, this.getHeaders(referer));
         return new Document(res.body);
     }
+    
+    async requestFullUrlDoc(url, referer) {
+        const res = await this.client.get(url, this.getHeaders(referer));
+        return new Document(res.body);
+    }
 
     parseAnimeFromElement(element) {
         const imageElement = element.selectFirst("picture img");
         return {
             name: imageElement.attr("alt"),
             imageUrl: imageElement.attr("data-src"),
-            link: element.attr("href")
+            link: element.attr("href").replace(this.getBaseUrl(), '')
         };
     }
 
@@ -68,37 +74,36 @@ class DefaultExtension extends MProvider {
             return filter.values[filter.state]?.value;
         }
 
-        let path;
-        const params = new URLSearchParams();
-        params.append('page', page);
+        const params = [];
+        params.push(`page=${page}`);
+        let basePath;
 
         if (query) {
-            params.append('q', query);
+            basePath = '/search';
+            params.push(`q=${encodeURIComponent(query)}`);
             const section = getSelectValue(filters[2]);
             const rating = getSelectValue(filters[3]);
             const format = getSelectValue(filters[4]);
             const quality = getSelectValue(filters[5]);
 
-            if (section !== '0') params.append('section', section);
-            if (rating !== '0') params.append('rating', rating);
-            if (format !== '0') params.append('formats', format);
-            if (quality !== '0') params.append('quality', quality);
-
-            path = `/search?${params.toString()}`;
+            if (section && section !== '0') params.push(`section=${section}`);
+            if (rating && rating !== '0') params.push(`rating=${rating}`);
+            if (format && format !== '0') params.push(`formats=${format}`);
+            if (quality && quality !== '0') params.push(`quality=${quality}`);
         } else {
-            const type = getSelectValue(filters[8]);
+            const type = getSelectValue(filters[8]) || 'movies';
+            basePath = `/${type}`;
             const sectionS = getSelectValue(filters[9]);
             const categoryS = getSelectValue(filters[10]);
             const ratingS = getSelectValue(filters[11]);
             
-            if (sectionS !== '0') params.append('section', sectionS);
-            if (categoryS !== '0') params.append('category', categoryS);
-            if (ratingS !== '0') params.append('rating', ratingS);
-
-            path = `/${type}?${params.toString()}`;
+            if (sectionS && sectionS !== '0') params.push(`section=${sectionS}`);
+            if (categoryS && categoryS !== '0') params.push(`category=${categoryS}`);
+            if (ratingS && ratingS !== '0') params.push(`rating=${ratingS}`);
         }
         
-        const doc = await this.requestDoc(path);
+        const finalPath = `${basePath}?${params.join('&')}`;
+        const doc = await this.requestDoc(finalPath);
         const list = [];
         const items = doc.select("div.widget div.widget-body div.col-lg-auto div.entry-box div.entry-image a.box");
 
@@ -118,61 +123,106 @@ class DefaultExtension extends MProvider {
                           .map(e => e.text.replace("جودة الفيلم : ", "").trim());
         const author = doc.selectFirst("span:contains(انتاج)")?.text.replace("انتاج : ", "").trim() ?? '';
         const description = doc.selectFirst("div.widget:contains(قصة )")?.text.trim() ?? '';
-        const status = 1; // Completed
+        const status = 1;
 
         const chapters = [];
         const episodeElements = doc.select("div.bg-primary2 h2 a");
         if (episodeElements.length === 0) {
-            // Movie
-            const movieElement = doc.selectFirst("input#reportInputUrl");
-            if (movieElement) {
-                chapters.push({
-                    name: "مشاهدة",
-                    url: movieElement.attr("value")
-                });
-            }
+            chapters.push({
+                name: "مشاهدة",
+                url: url
+            });
         } else {
-            // Series
             episodeElements.forEach(element => {
+                const originalName = element.text;
+                let finalName = originalName;
+
+                // Try to parse the episode number from a title like "حلقة 1 : مسلسل..."
+                const match = originalName.match(/حلقة\s*(\d+)/);
+                if (match && match[1]) {
+                    // Format as "الحلقة : 1" (Episode : 1)
+                    finalName = `الحلقة : ${match[1]}`;
+                }
+
                 chapters.push({
-                    name: element.text,
-                    url: element.getHref
+                    name: finalName,
+                    url: element.getHref.replace(this.getBaseUrl(), '')
                 });
             });
         }
         
-        return { name, genre: genres, author, description, status, link: url, chapters };
+        return { author, description, status, link: url, chapters };
     }
     
+    // return { name, genre: genres, author, description, status, link: url, chapters };
+
+    // FIXED: Added preference to filter stream/download links.
     async getVideoList(url) {
-        const doc = await this.requestDoc(url);
-        
-        const linkShow = doc.selectFirst("a.link-show");
-        if (!linkShow) {
-            throw new Error("Video link not found.");
-        }
-        const watchPart = linkShow.getHref;
-        const pageId = doc.selectFirst("input#page_id")?.attr("value");
-
-        if (!pageId) {
-             throw new Error("Page ID not found.");
-        }
-
-        const watchPath = watchPart.substring(watchPart.indexOf("/watch"));
-        const iframeUrl = `${this.getBaseUrl()}${watchPath}/${pageId}`;
-        const referer = this.getBaseUrl() + url;
-
-        const iframeDoc = await this.requestDoc(iframeUrl.replace(this.getBaseUrl(), ''), referer);
-
         const videos = [];
-        iframeDoc.select("source").forEach(element => {
-            const src = element.attr("src").replace("https", "http");
-            videos.push({
-                url: src,
-                originalUrl: src,
-                quality: `${element.attr("size")}p`
-            });
-        });
+        const initialDoc = await this.requestDoc(url);
+        const referer = this.getBaseUrl() + url;
+        const sourceTypePref = this.getPreference("video_source_type") ?? "both";
+
+        const downloadWidget = initialDoc.selectFirst("div.widget:has(header#downloads)");
+        if (!downloadWidget) {
+            throw new Error("Could not find the download/streaming widget.");
+        }
+
+        const qualityTabs = downloadWidget.select("div.header-tabs-container > ul.header-tabs > li > a");
+
+        for (const tabLink of qualityTabs) {
+            const qualityName = tabLink.text;
+            const tabId = tabLink.attr("href");
+            const tabContent = downloadWidget.selectFirst(`div${tabId}`);
+
+            if (!tabContent) continue;
+
+            const processLink = async (linkElement, type) => {
+                if (!linkElement) return;
+
+                const intermediateUrl1 = linkElement.getHref;
+                const intermediateDoc1 = await this.requestFullUrlDoc(intermediateUrl1, referer);
+                
+                const intermediateUrl2 = intermediateDoc1.selectFirst("a.download-link")?.getHref;
+                if (!intermediateUrl2) return;
+
+                const finalDoc = await this.requestFullUrlDoc(intermediateUrl2, intermediateUrl1);
+
+                if (type === 'Stream') {
+                    finalDoc.select("video source").forEach(source => {
+                        const src = source.attr("src");
+                        const quality = source.attr("size");
+                        if (src && quality) {
+                            videos.push({
+                                url: src,
+                                originalUrl: src,
+                                quality: `${type} - ${quality}p`
+                            });
+                        }
+                    });
+                } else if (type === 'Download') {
+                    const finalLink = finalDoc.selectFirst("a[download]")?.getHref;
+                    if (finalLink) {
+                        videos.push({
+                            url: finalLink,
+                            originalUrl: finalLink,
+                            quality: `${type} - ${qualityName}`
+                        });
+                    }
+                }
+            };
+
+            if (sourceTypePref === "both" || sourceTypePref === "stream") {
+                 await processLink(tabContent.selectFirst("a.link-show"), 'Stream');
+            }
+            if (sourceTypePref === "both" || sourceTypePref === "download") {
+                await processLink(tabContent.selectFirst("a.link-download"), 'Download');
+            }
+        }
+
+        if (videos.length === 0) {
+            throw new Error("No video sources found for the selected type. The website structure might have changed.");
+        }
 
         const preferredQuality = this.getPreference("preferred_quality");
         if (preferredQuality) {
@@ -181,7 +231,9 @@ class DefaultExtension extends MProvider {
                 const bIsPreferred = b.quality.includes(preferredQuality);
                 if (aIsPreferred && !bIsPreferred) return -1;
                 if (!aIsPreferred && bIsPreferred) return 1;
-                return 0; // Or further sort by quality numerically if needed
+                const aQualityNum = parseInt(a.quality.match(/\d+/)?.[0] || 0);
+                const bQualityNum = parseInt(b.quality.match(/\d+/)?.[0] || 0);
+                return bQualityNum - aQualityNum;
             });
         }
         
@@ -213,12 +265,31 @@ class DefaultExtension extends MProvider {
         ];
     }
     
+    // FIXED: Added URL override and Stream/Download choice.
     getSourcePreferences() {
         return [{
+            key: "override_base_url",
+            editTextPreference: {
+                title: "Override Base URL",
+                summary: "Use a different mirror/domain for the source",
+                value: this.source.baseUrl,
+                dialogTitle: "Enter new Base URL",
+                dialogMessage: `Default: ${this.source.baseUrl}`,
+            }
+        }, {
+            key: "video_source_type",
+            listPreference: {
+                title: "Preferred Video Source",
+                summary: "Choose to show stream links, download links, or both.",
+                valueIndex: 0,
+                entries: ["Stream & Download", "Stream Only", "Download Only"],
+                entryValues: ["both", "stream", "download"],
+            }
+        }, {
             key: "preferred_quality",
             listPreference: {
                 title: "Preferred quality",
-                summary: "%s",
+                summary: "This will be prioritized in the video list.",
                 valueIndex: 0,
                 entries: ["1080p", "720p", "480p", "360p", "240p"],
                 entryValues: ["1080", "720", "480", "360", "240"],
