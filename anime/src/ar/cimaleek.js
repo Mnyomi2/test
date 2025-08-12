@@ -2,8 +2,8 @@ const mangayomiSources = [{
     "name": "سيما ليك",
     "id": 5798993892749847,
     "lang": "ar",
-    "baseUrl": "https://m.cimaleek.to",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=m.cimaleek.to",
+    "baseUrl": "https://cimalek.art",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cimalek.art",
     "typeSource": "single",
     "itemType": 1,
     "version": "1.0.0",
@@ -20,9 +20,10 @@ class DefaultExtension extends MProvider {
         return new SharedPreferences().get(key);
     }
 
-    getHeaders() {
+    getHeaders(referer) {
         return {
-            "Referer": this.getBaseUrl() + "/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+            "Referer": referer || this.getBaseUrl() + "/",
         };
     }
 
@@ -39,11 +40,17 @@ class DefaultExtension extends MProvider {
         const items = doc.select("div.film_list-wrap div.item");
 
         for (const item of items) {
-            const linkElement = item.selectFirst("a");
-            const name = item.selectFirst("div.data .title").text;
-            const imageUrl = item.selectFirst("img").attr("data-src");
-            const link = linkElement.getHref.replace(this.getBaseUrl(), "");
-            list.push({ name, imageUrl, link });
+            const linkElement = item.selectFirst("div.film-poster a");
+            const nameElement = item.selectFirst("div.data .title");
+            const imageElement = item.selectFirst("div.film-poster img.film-poster-img");
+
+            if (linkElement && nameElement && imageElement) {
+                const name = nameElement.text.trim();
+                const fullLink = linkElement.getHref;
+                const link = fullLink.replace(/^(https?:\/\/)?[^\/]+/, '');
+                const imageUrl = imageElement.attr("data-src");
+                list.push({ name, imageUrl, link });
+            }
         }
 
         const hasNextPage = doc.selectFirst("div.pagination div.pagination-num i#nextpagination") != null;
@@ -68,13 +75,14 @@ class DefaultExtension extends MProvider {
     }
 
     async getLatestUpdates(page) {
-        const url = `${this.getBaseUrl()}/recent/page/${page}/`;
+        const url = `${this.getBaseUrl()}/recent-89541/page/${page}/`;
         return await this.parseCataloguePage(url);
     }
 
     async search(query, page, filters) {
+        let url;
         if (query) {
-            const url = `${this.getBaseUrl()}/page/${page}?s=${query}`;
+            url = `${this.getBaseUrl()}/page/${page}?s=${encodeURIComponent(query)}`;
             return await this.parseCataloguePage(url);
         }
 
@@ -82,35 +90,30 @@ class DefaultExtension extends MProvider {
         const categoryFilter = filters.find(f => f.name === "النوع");
         const genreFilter = filters.find(f => f.name === "التصنيف");
 
-        let url = this.getBaseUrl();
-        const params = new URLSearchParams();
-
         if (sectionFilter && sectionFilter.state !== 0) {
             const value = sectionFilter.values[sectionFilter.state].value;
-            url += `/category/${value}/page/${page}/`;
+            url = `${this.getBaseUrl()}/category/${value}/page/${page}/`;
         } else if (categoryFilter && categoryFilter.state !== 0) {
             const catValue = categoryFilter.values[categoryFilter.state].value;
             const genreValue = genreFilter.values[genreFilter.state].value.toLowerCase();
-            url += `/genre/${genreValue}/page/${page}/`;
-            params.set("type", catValue);
+            url = `${this.getBaseUrl()}/genre/${genreValue}/page/${page}/?type=${catValue}`;
         } else {
-            // Default to popular if no filters are selected
             return this.getPopular(page);
         }
         
-        const finalUrl = `${url}?${params.toString()}`;
-        return await this.parseCataloguePage(finalUrl);
+        return await this.parseCataloguePage(url);
     }
 
     async getDetail(url) {
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders());
         const doc = new Document(res.body);
 
-        const name = doc.selectFirst("div.anisc-more-info div.item:contains(الاسم) span:nth-child(3)").text;
-        const imageUrl = doc.selectFirst("div.ani_detail-stage div.film-poster img").attr("src");
-        const description = doc.selectFirst("div.anisc-detail div.film-description div.text").text;
-        const genre = doc.select("div.anisc-detail div.item-list a").map(e => e.text);
-        const status = doc.select("div.anisc-detail div.item-list").text.includes("افلام") ? 1 : 5;
+        const name = doc.selectFirst("h2.film-name.dynamic-name")?.text?.trim() ?? "";
+        const imageUrl = doc.selectFirst("div.anisc-poster img.film-poster-img")?.attr("src") ?? "";
+        const description = doc.selectFirst("div.film-description div.text")?.text?.trim() ?? "";
+        const genre = doc.select("div.item-list a").map(e => e.text.trim());
+        const author = doc.selectFirst("div.anisc-more-info div.item:contains(البلد) span:last-child")?.text?.trim() ?? "";
+        const status = url.includes("/movies/") ? 1 : 5;
 
         const chapters = [];
         const isMovie = url.includes("/movies/");
@@ -131,67 +134,145 @@ class DefaultExtension extends MProvider {
                 const episodeElements = seasonDoc.select("div.season-a ul.episodios li.episodesList a");
                 for (const episodeElement of episodeElements) {
                     const episodeNum = episodeElement.selectFirst("span.serie").text.substringAfter("(").substringBefore(")");
-                    const episodeUrl = episodeElement.getHref.replace(this.getBaseUrl(), "");
+                    const fullEpisodeUrl = episodeElement.getHref;
+                    const episodePath = fullEpisodeUrl.replace(/^(https?:\/\/)?[^\/]+/, '');
                     chapters.push({
                         name: `الموسم ${seasonName} الحلقة ${episodeNum}`,
-                        url: `${episodeUrl}watch/`
+                        url: `${episodePath}watch/`
                     });
                 }
             }
             chapters.reverse();
         }
 
-        return { name, imageUrl, description, link: url, status, genre, chapters };
+        return { name, imageUrl, description, author, link: url, status, genre, chapters };
     }
 
+    // --- VIDEO EXTRACTION ---
+
+    async extractVideosFromUrl(url, qualityPrefix) {
+        console.log(`[Extractor] Attempting to extract from: ${url}`);
+        if (url.includes("mp4upload.com")) {
+            return await this.mp4uploadExtractor(url, qualityPrefix);
+        }
+        if (url.includes("dood")) {
+            return await this.doodstreamExtractor(url, qualityPrefix);
+        }
+        if (url.includes("voe.sx")) {
+            return await this.voeExtractor(url, qualityPrefix);
+        }
+        console.log(`[Extractor] Unsupported host for URL: ${url}. Adding as external link.`);
+        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} (External)\n${url}`, headers: this.getHeaders(url) }];
+    }
+
+    async mp4uploadExtractor(url, qualityPrefix) {
+        try {
+            const res = await this.client.get(url, this.getHeaders(url));
+            const sourceMatch = res.body.match(/player\.src\({src:\s*'([^']+)'/);
+            if (sourceMatch && sourceMatch[1]) {
+                const videoUrl = sourceMatch[1];
+                console.log(`[Mp4upload] Success! Final link: ${videoUrl}`);
+                // FIXED: Appended final video URL to the quality string.
+                return [{ url: videoUrl, originalUrl: videoUrl, quality: `${qualityPrefix} - Mp4upload\n${videoUrl}`, headers: this.getHeaders(url) }];
+            }
+        } catch (e) {
+            console.error("[Mp4upload] Extractor Error", e);
+        }
+        console.log(`[Mp4upload] Failed to extract from: ${url}`);
+        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Mp4upload (WebView)\n${url}`, headers: this.getHeaders(url) }];
+    }
+
+    async doodstreamExtractor(url, qualityPrefix) {
+        try {
+            const res = await this.client.get(url, this.getHeaders(url));
+            const md5 = res.body.match(/\/pass_md5\/([^']*)'/);
+            if (md5) {
+                const passMd5Url = `https://dood.yt${md5[0].slice(0, -1)}`;
+                const passRes = await this.client.get(passMd5Url, this.getHeaders(url));
+                const randomString = (Math.random() + 1).toString(36).substring(7);
+                const token = md5[1];
+                const videoUrl = `${passRes.body}${randomString}?token=${token}&expiry=${Date.now()}`;
+                console.log(`[Doodstream] Success! Final link: ${videoUrl}`);
+                // FIXED: Appended final video URL to the quality string.
+                return [{ url: videoUrl, originalUrl: url, quality: `${qualityPrefix} - Doodstream\n${videoUrl}`, headers: this.getHeaders(url) }];
+            }
+        } catch (e) {
+            console.error("[Doodstream] Extractor Error", e);
+        }
+        console.log(`[Doodstream] Failed to extract from: ${url}`);
+        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Doodstream (WebView)\n${url}`, headers: this.getHeaders(url) }];
+    }
+
+    async voeExtractor(url, qualityPrefix) {
+        try {
+            const res = await this.client.get(url, this.getHeaders(url));
+            const hlsUrlMatch = res.body.match(/'hls':\s*'([^']+)'/);
+            if (hlsUrlMatch && hlsUrlMatch[1]) {
+                const hlsUrl = hlsUrlMatch[1];
+                console.log(`[Voe] Success! HLS link: ${hlsUrl}`);
+                return await this.extractM3U8(hlsUrl, `${qualityPrefix} - Voe`);
+            }
+        } catch (e) {
+            console.error("[Voe] Extractor Error", e);
+        }
+        console.log(`[Voe] Failed to extract from: ${url}`);
+        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Voe (WebView)\n${url}`, headers: this.getHeaders(url) }];
+    }
+    
     async getVideoList(url) {
+        console.log(`Starting video extraction for: ${this.getBaseUrl() + url}`);
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders());
         const doc = new Document(res.body);
-        const videos = [];
+        let videos = [];
 
-        const script = doc.selectFirst("script:contains(dtAjax)").data;
-        const version = script.substringAfter("ver\":\"").substringBefore("\"");
-
-        const serverElements = doc.select("div#servers-content div.server-item div");
-        for (const serverElement of serverElements) {
-            try {
-                const apiUrl = new URL(`${this.getBaseUrl()}/wp-json/lalaplayer/v2/`);
-                apiUrl.searchParams.set("p", serverElement.attr("data-post"));
-                apiUrl.searchParams.set("t", serverElement.attr("data-type"));
-                apiUrl.searchParams.set("n", serverElement.attr("data-nume"));
-                apiUrl.searchParams.set("ver", version);
-                apiUrl.searchParams.set("rand", this.generateRandomString(16));
-                
-                const frameRes = await this.client.get(apiUrl.toString(), this.getHeaders());
-                const frameData = JSON.parse(frameRes.body);
-                const embedUrl = frameData.embed_url;
-
-                if (embedUrl) {
-                    const embedRes = await this.client.get(embedUrl, { "Referer": this.getBaseUrl() + "/" });
-                    const embedHtml = embedRes.body;
-                    const sourceMatch = embedHtml.match(/sources:\s*\[{\s*file:\s*"([^"]+)"/);
-                    if (sourceMatch && sourceMatch[1]) {
-                        const videoUrl = sourceMatch[1];
-                        if (videoUrl.includes(".m3u8")) {
-                            const qualities = await this.extractM3U8(videoUrl, serverElement.text);
-                            videos.push(...qualities);
-                        } else {
-                            videos.push({
-                                url: videoUrl,
-                                originalUrl: videoUrl,
-                                quality: serverElement.text,
-                                headers: { "Referer": embedUrl }
-                            });
-                        }
+        // --- Process Streaming Servers ---
+        const script = doc.selectFirst("script:contains(dtAjax)")?.data;
+        if (script) {
+            const version = script.substringAfter("ver\":\"").substringBefore("\"");
+            const serverElements = doc.select("div#servers-content div.server-item div");
+            console.log(`Found ${serverElements.length} streaming servers.`);
+            for (const serverElement of serverElements) {
+                const serverName = serverElement.text.trim();
+                try {
+                    const params = `p=${serverElement.attr("data-post")}&t=${serverElement.attr("data-type")}&n=${serverElement.attr("data-nume")}&ver=${version}&rand=${this.generateRandomString(16)}`;
+                    const apiUrl = `${this.getBaseUrl()}/wp-json/lalaplayer/v2/?${params}`;
+                    const frameRes = await this.client.get(apiUrl, this.getHeaders());
+                    let embedUrl = JSON.parse(frameRes.body).embed_url;
+                    if (embedUrl) {
+                        if (embedUrl.startsWith("//")) embedUrl = "https:" + embedUrl;
+                        console.log(`[Stream: ${serverName}] Found embed URL: ${embedUrl}`);
+                        videos.push(...(await this.extractVideosFromUrl(embedUrl, serverName)));
+                    } else {
+                        console.log(`[Stream: ${serverName}] No embed URL found.`);
                     }
+                } catch (e) { 
+                    console.error(`[Stream: ${serverName}] Error processing server`, e);
                 }
-            } catch (e) {
-                // Ignore server error
             }
+        } else {
+            console.log("No player script found. Skipping streaming servers.");
+        }
+
+        // --- Process Download Links ---
+        const downloadElements = doc.select("div.downlo a.ssl-item.ep-item");
+        console.log(`Found ${downloadElements.length} download links.`);
+        for (const element of downloadElements) {
+            const downloadUrl = element.getHref;
+            const qualityInfo = element.selectFirst("em")?.text ?? "Download";
+            console.log(`[Download] Processing link: ${downloadUrl}`);
+            videos.push(...(await this.extractVideosFromUrl(downloadUrl, `Download ${qualityInfo}`)));
         }
         
+        console.log(`Total videos found before sorting: ${videos.length}`);
+        
+        // --- Sort and Finalize ---
         const preferredQuality = this.getPreference("preferred_quality") || "1080";
         videos.sort((a, b) => {
+            const isAWebView = a.quality.includes("(WebView)") || a.quality.includes("(External)");
+            const isBWebView = b.quality.includes("(WebView)") || b.quality.includes("(External)");
+            if (isAWebView && !isBWebView) return 1;
+            if (!isAWebView && isBWebView) return -1;
+            
             const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0);
             const qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
             if (a.quality.includes(preferredQuality)) return -1;
@@ -199,38 +280,41 @@ class DefaultExtension extends MProvider {
             return qualityB - qualityA;
         });
 
+        console.log("Final sorted video list count:", videos.length);
         return videos;
     }
 
     async extractM3U8(url, serverName) {
-        const res = await this.client.get(url, { "Referer": url });
-        const masterPlaylist = res.body;
-        const videoList = [];
-
-        const lines = masterPlaylist.split('\n');
-        let quality = "";
-        for (const line of lines) {
-            if (line.includes('RESOLUTION=')) {
-                const resolution = line.match(/RESOLUTION=(\d+x\d+)/)[1];
-                quality = resolution.split('x')[1] + 'p';
-            } else if (line.endsWith('.m3u8')) {
-                const videoUrl = new URL(url);
-                videoUrl.pathname = videoUrl.pathname.replace(/\/[^\/]*$/, `/${line}`);
-                videoList.push({
-                    url: videoUrl.toString(),
-                    originalUrl: videoUrl.toString(),
-                    quality: `${serverName}: ${quality}`,
-                    headers: { "Referer": url }
-                });
+        try {
+            const res = await this.client.get(url, this.getHeaders(url));
+            const masterPlaylist = res.body;
+            const videoList = [];
+            const baseUrlForRelativePaths = url.substring(0, url.lastIndexOf('/') + 1);
+            const lines = masterPlaylist.split('\n');
+            let quality = "";
+            for (const line of lines) {
+                if (line.includes('RESOLUTION=')) {
+                    const resolution = line.match(/RESOLUTION=(\d+x\d+)/)[1];
+                    quality = resolution.split('x')[1] + 'p';
+                } else if (line.endsWith('.m3u8')) {
+                    const videoUrl = line.startsWith('http') ? line : baseUrlForRelativePaths + line;
+                    // FIXED: Appended final video URL to the quality string.
+                    videoList.push({ url: videoUrl, originalUrl: videoUrl, quality: `${serverName}: ${quality}\n${videoUrl}`, headers: this.getHeaders(url) });
+                }
             }
+            if (videoList.length === 0) {
+                 // FIXED: Appended final video URL to the quality string.
+                videoList.push({ url: url, originalUrl: url, quality: `${serverName}: Auto\n${url}`, headers: this.getHeaders(url) });
+            }
+            return videoList;
+        } catch (e) {
+            console.error(`[M3U8 Extractor] Failed for ${url}`, e);
+             // FIXED: Appended final video URL to the quality string.
+            return [{ url: url, originalUrl: url, quality: `${serverName}: Auto (HLS)\n${url}`, headers: this.getHeaders(url) }];
         }
-        if (videoList.length === 0) {
-            videoList.push({ url: url, originalUrl: url, quality: serverName + ": Auto", headers: { "Referer": url }});
-        }
-        return videoList;
     }
 
-    // --- FILTERS ---
+    // --- FILTERS AND PREFERENCES ---
     getFilterList() {
         return [{
             type_name: "HeaderFilter",
@@ -279,7 +363,6 @@ class DefaultExtension extends MProvider {
         }];
     }
     
-    // --- PREFERENCES ---
     getSourcePreferences() {
         return [{
             key: "preferred_quality",
