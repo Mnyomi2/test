@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=ak.sv",
     "typeSource": "single",
     "itemType": 1,
-    "version": "1.0.7",
+    "version": "1.0.8",
     "pkgPath": "anime/src/ar/akwam.js"
 }];
 
@@ -63,10 +63,23 @@ class DefaultExtension extends MProvider {
         const hasNextPage = !!doc.selectFirst("ul.pagination li.page-item a[rel=next]");
         return { list, hasNextPage };
     }
-
+	
+	
     async getLatestUpdates(page) {
-        throw new Error("Not supported");
+        const doc = await this.requestDoc(`/recent?page=${page}`);
+        const list = [];
+        const items = doc.select("div.entry-box-1 div.entry-image a.box");
+
+        for (const item of items) {
+            list.push(this.parseAnimeFromElement(item));
+        }
+
+        return { list, hasNextPage: false };
     }
+	
+//      const hasNextPage = !!doc.selectFirst("ul.pagination li.page-item a[rel=next]");
+//      return { list, hasNextPage };
+
 
     async search(query, page, filters) {
         function getSelectValue(filter) {
@@ -138,7 +151,7 @@ class DefaultExtension extends MProvider {
                 let finalName = originalName;
 
                 // Try to parse the episode number from a title like "حلقة 1 : مسلسل..."
-                const match = originalName.match(/حلقة\s*(\d+)/);
+                const match = originalName.match(/\b(\d+)\s*[:\-]|\/|^(\d+)$/);
                 if (match && match[1]) {
                     // Format as "الحلقة : 1" (Episode : 1)
                     finalName = `الحلقة : ${match[1]}`;
