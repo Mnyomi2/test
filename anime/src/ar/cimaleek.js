@@ -67,6 +67,18 @@ class DefaultExtension extends MProvider {
         return result;
     }
 
+    async retry(fn, retries = 2) {
+        for (let i = 0; i < retries; i++) {
+            try {
+                return await fn();
+            } catch (e) {
+                if (i === retries - 1) throw e;
+                console.warn(`[Retry ${i + 1}]`, e.message);
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+    }
+
     // --- CORE METHODS ---
 
     async getPopular(page) {
@@ -160,19 +172,52 @@ class DefaultExtension extends MProvider {
         if (url.includes("voe.sx")) {
             return await this.voeExtractor(url, qualityPrefix);
         }
+        if (url.includes("top15top.shop") || url.includes("megamax.click")) {
+            return await this.redirectExtractor(url, qualityPrefix);
+        }
         return [{ url: url, originalUrl: url, quality: `${qualityPrefix}\n${url}`, headers: this.getHeaders(url) }];
     }
 
     async mp4uploadExtractor(url, qualityPrefix) {
         try {
-            const res = await this.client.get(url, this.getHeaders(url));
-            const sourceMatch = res.body.match(/player\.src\({src:\s*'([^']+)'/);
+            const id = url.split('/').pop();
+            const embedUrl = `https://www.mp4upload.com/embed-${id}.html`;
+            const res = await this.client.get(embedUrl, this.getHeaders(embedUrl));
+            const sourceMatch = res.body.match(/player\.src\({src:\s*["']([^"']+)["']/);
             if (sourceMatch && sourceMatch[1]) {
                 const videoUrl = sourceMatch[1];
-                return [{ url: videoUrl, originalUrl: videoUrl, quality: `${qualityPrefix} - Mp4upload\n${videoUrl}`, headers: this.getHeaders(url) }];
+                return [{ url: videoUrl, originalUrl: url, quality: `${qualityPrefix} - Mp4upload\n${videoUrl}`, headers: this.getHeaders(embedUrl) }];
             }
-        } catch (e) {}
+        } catch (e) {
+            console.error(`[Mp4Upload Error] ${url}`, e.message);
+        }
         return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Mp4upload\n${url}`, headers: this.getHeaders(url) }];
+    }
+
+    async redirectExtractor(url, qualityPrefix) {
+        try {
+            let res = await this.client.get(url, this.getHeaders(this.getBaseUrl()));
+            let doc = new Document(res.body);
+            const form = doc.selectFirst('form[name="F1"]');
+            if (form) {
+                const inputs = form.select("input");
+                const formData = {};
+                inputs.forEach(input => {
+                    formData[input.attr("name")] = input.attr("value");
+                });
+                await new Promise(resolve => setTimeout(resolve, 1500)); 
+                res = await this.client.post(url, this.getHeaders(url), formData);
+                doc = new Document(res.body);
+                const finalLink = doc.selectFirst('span > a');
+                if (finalLink) {
+                    const videoUrl = finalLink.getHref;
+                    return [{ url: videoUrl, originalUrl: url, quality: `${qualityPrefix}\n${videoUrl}`, headers: this.getHeaders(url) }];
+                }
+            }
+        } catch(e) {
+            console.error(`[RedirectExtractor Error] ${url}`, e.message);
+        }
+        return [{ url: url, originalUrl: url, quality: `${qualityPrefix}\n${url}`, headers: this.getHeaders(url) }];
     }
 
     async doodstreamExtractor(url, qualityPrefix) {
@@ -180,14 +225,16 @@ class DefaultExtension extends MProvider {
             const res = await this.client.get(url, this.getHeaders(url));
             const md5 = res.body.match(/\/pass_md5\/([^']*)'/);
             if (md5) {
-                const passMd5Url = `https://dood.yt${md5[0].slice(0, -1)}`;
+                const passMd5Url = `https://dood.yt/${md5[1]}`;
                 const passRes = await this.client.get(passMd5Url, this.getHeaders(url));
                 const randomString = (Math.random() + 1).toString(36).substring(7);
                 const token = md5[1];
                 const videoUrl = `${passRes.body}${randomString}?token=${token}&expiry=${Date.now()}`;
                 return [{ url: videoUrl, originalUrl: url, quality: `${qualityPrefix} - Doodstream\n${videoUrl}`, headers: this.getHeaders(url) }];
             }
-        } catch (e) {}
+        } catch (e) {
+            console.error(`[Doodstream Error] ${url}`, e.message);
+        }
         return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Doodstream\n${url}`, headers: this.getHeaders(url) }];
     }
 
@@ -199,7 +246,9 @@ class DefaultExtension extends MProvider {
                 const hlsUrl = hlsUrlMatch[1];
                 return await this.extractM3U8(hlsUrl, `${qualityPrefix} - Voe`);
             }
-        } catch (e) {}
+        } catch (e) {
+            console.error(`[Voe Error] ${url}`, e.message);
+        }
         return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Voe\n${url}`, headers: this.getHeaders(url) }];
     }
     
@@ -224,7 +273,9 @@ class DefaultExtension extends MProvider {
                         if (embedUrl.startsWith("//")) embedUrl = "https:" + embedUrl;
                         videos.push(...(await this.extractVideosFromUrl(embedUrl, serverName)));
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error(`[Server Extraction Error] ${serverName}`, e.message);
+                }
             }
         }
 
@@ -239,10 +290,13 @@ class DefaultExtension extends MProvider {
         // Sort and Finalize
         const preferredQuality = this.getPreference("preferred_quality") || "1080";
         videos.sort((a, b) => {
+            const isAPreferred = a.quality.includes(preferredQuality);
+            const isBPreferred = b.quality.includes(preferredQuality);
+            if (isAPreferred && !isBPreferred) return -1;
+            if (!isAPreferred && isBPreferred) return 1;
+
             const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0);
             const qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
-            if (a.quality.includes(preferredQuality)) return -1;
-            if (b.quality.includes(preferredQuality)) return 1;
             return qualityB - qualityA;
         });
 
@@ -271,7 +325,8 @@ class DefaultExtension extends MProvider {
             }
             return videoList;
         } catch (e) {
-            return [{ url: url, originalUrl: url, quality: `${serverName}: HLS\n${url}`, headers: this.getHeaders(url) }];
+            console.error(`[M3U8 Error] ${url}`, e.message);
+            return [{ url: url, originalUrl: url, quality: `${serverName}: Auto (HLS)\n${url}`, headers: this.getHeaders(url) }];
         }
     }
 
