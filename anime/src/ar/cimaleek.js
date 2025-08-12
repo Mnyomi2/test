@@ -151,7 +151,6 @@ class DefaultExtension extends MProvider {
     // --- VIDEO EXTRACTION ---
 
     async extractVideosFromUrl(url, qualityPrefix) {
-        console.log(`[Extractor] Attempting to extract from: ${url}`);
         if (url.includes("mp4upload.com")) {
             return await this.mp4uploadExtractor(url, qualityPrefix);
         }
@@ -161,8 +160,7 @@ class DefaultExtension extends MProvider {
         if (url.includes("voe.sx")) {
             return await this.voeExtractor(url, qualityPrefix);
         }
-        console.log(`[Extractor] Unsupported host for URL: ${url}. Adding as external link.`);
-        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} (External)\n${url}`, headers: this.getHeaders(url) }];
+        return [{ url: url, originalUrl: url, quality: `${qualityPrefix}\n${url}`, headers: this.getHeaders(url) }];
     }
 
     async mp4uploadExtractor(url, qualityPrefix) {
@@ -171,15 +169,10 @@ class DefaultExtension extends MProvider {
             const sourceMatch = res.body.match(/player\.src\({src:\s*'([^']+)'/);
             if (sourceMatch && sourceMatch[1]) {
                 const videoUrl = sourceMatch[1];
-                console.log(`[Mp4upload] Success! Final link: ${videoUrl}`);
-                // FIXED: Appended final video URL to the quality string.
                 return [{ url: videoUrl, originalUrl: videoUrl, quality: `${qualityPrefix} - Mp4upload\n${videoUrl}`, headers: this.getHeaders(url) }];
             }
-        } catch (e) {
-            console.error("[Mp4upload] Extractor Error", e);
-        }
-        console.log(`[Mp4upload] Failed to extract from: ${url}`);
-        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Mp4upload (WebView)\n${url}`, headers: this.getHeaders(url) }];
+        } catch (e) {}
+        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Mp4upload\n${url}`, headers: this.getHeaders(url) }];
     }
 
     async doodstreamExtractor(url, qualityPrefix) {
@@ -192,15 +185,10 @@ class DefaultExtension extends MProvider {
                 const randomString = (Math.random() + 1).toString(36).substring(7);
                 const token = md5[1];
                 const videoUrl = `${passRes.body}${randomString}?token=${token}&expiry=${Date.now()}`;
-                console.log(`[Doodstream] Success! Final link: ${videoUrl}`);
-                // FIXED: Appended final video URL to the quality string.
                 return [{ url: videoUrl, originalUrl: url, quality: `${qualityPrefix} - Doodstream\n${videoUrl}`, headers: this.getHeaders(url) }];
             }
-        } catch (e) {
-            console.error("[Doodstream] Extractor Error", e);
-        }
-        console.log(`[Doodstream] Failed to extract from: ${url}`);
-        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Doodstream (WebView)\n${url}`, headers: this.getHeaders(url) }];
+        } catch (e) {}
+        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Doodstream\n${url}`, headers: this.getHeaders(url) }];
     }
 
     async voeExtractor(url, qualityPrefix) {
@@ -209,28 +197,22 @@ class DefaultExtension extends MProvider {
             const hlsUrlMatch = res.body.match(/'hls':\s*'([^']+)'/);
             if (hlsUrlMatch && hlsUrlMatch[1]) {
                 const hlsUrl = hlsUrlMatch[1];
-                console.log(`[Voe] Success! HLS link: ${hlsUrl}`);
                 return await this.extractM3U8(hlsUrl, `${qualityPrefix} - Voe`);
             }
-        } catch (e) {
-            console.error("[Voe] Extractor Error", e);
-        }
-        console.log(`[Voe] Failed to extract from: ${url}`);
-        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Voe (WebView)\n${url}`, headers: this.getHeaders(url) }];
+        } catch (e) {}
+        return [{ url: url, originalUrl: url, quality: `${qualityPrefix} - Voe\n${url}`, headers: this.getHeaders(url) }];
     }
     
     async getVideoList(url) {
-        console.log(`Starting video extraction for: ${this.getBaseUrl() + url}`);
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders());
         const doc = new Document(res.body);
         let videos = [];
 
-        // --- Process Streaming Servers ---
+        // Process Streaming Servers
         const script = doc.selectFirst("script:contains(dtAjax)")?.data;
         if (script) {
             const version = script.substringAfter("ver\":\"").substringBefore("\"");
             const serverElements = doc.select("div#servers-content div.server-item div");
-            console.log(`Found ${serverElements.length} streaming servers.`);
             for (const serverElement of serverElements) {
                 const serverName = serverElement.text.trim();
                 try {
@@ -240,39 +222,23 @@ class DefaultExtension extends MProvider {
                     let embedUrl = JSON.parse(frameRes.body).embed_url;
                     if (embedUrl) {
                         if (embedUrl.startsWith("//")) embedUrl = "https:" + embedUrl;
-                        console.log(`[Stream: ${serverName}] Found embed URL: ${embedUrl}`);
                         videos.push(...(await this.extractVideosFromUrl(embedUrl, serverName)));
-                    } else {
-                        console.log(`[Stream: ${serverName}] No embed URL found.`);
                     }
-                } catch (e) { 
-                    console.error(`[Stream: ${serverName}] Error processing server`, e);
-                }
+                } catch (e) {}
             }
-        } else {
-            console.log("No player script found. Skipping streaming servers.");
         }
 
-        // --- Process Download Links ---
+        // Process Download Links
         const downloadElements = doc.select("div.downlo a.ssl-item.ep-item");
-        console.log(`Found ${downloadElements.length} download links.`);
         for (const element of downloadElements) {
             const downloadUrl = element.getHref;
             const qualityInfo = element.selectFirst("em")?.text ?? "Download";
-            console.log(`[Download] Processing link: ${downloadUrl}`);
             videos.push(...(await this.extractVideosFromUrl(downloadUrl, `Download ${qualityInfo}`)));
         }
         
-        console.log(`Total videos found before sorting: ${videos.length}`);
-        
-        // --- Sort and Finalize ---
+        // Sort and Finalize
         const preferredQuality = this.getPreference("preferred_quality") || "1080";
         videos.sort((a, b) => {
-            const isAWebView = a.quality.includes("(WebView)") || a.quality.includes("(External)");
-            const isBWebView = b.quality.includes("(WebView)") || b.quality.includes("(External)");
-            if (isAWebView && !isBWebView) return 1;
-            if (!isAWebView && isBWebView) return -1;
-            
             const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0);
             const qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
             if (a.quality.includes(preferredQuality)) return -1;
@@ -280,7 +246,6 @@ class DefaultExtension extends MProvider {
             return qualityB - qualityA;
         });
 
-        console.log("Final sorted video list count:", videos.length);
         return videos;
     }
 
@@ -298,19 +263,15 @@ class DefaultExtension extends MProvider {
                     quality = resolution.split('x')[1] + 'p';
                 } else if (line.endsWith('.m3u8')) {
                     const videoUrl = line.startsWith('http') ? line : baseUrlForRelativePaths + line;
-                    // FIXED: Appended final video URL to the quality string.
                     videoList.push({ url: videoUrl, originalUrl: videoUrl, quality: `${serverName}: ${quality}\n${videoUrl}`, headers: this.getHeaders(url) });
                 }
             }
             if (videoList.length === 0) {
-                 // FIXED: Appended final video URL to the quality string.
                 videoList.push({ url: url, originalUrl: url, quality: `${serverName}: Auto\n${url}`, headers: this.getHeaders(url) });
             }
             return videoList;
         } catch (e) {
-            console.error(`[M3U8 Extractor] Failed for ${url}`, e);
-             // FIXED: Appended final video URL to the quality string.
-            return [{ url: url, originalUrl: url, quality: `${serverName}: Auto (HLS)\n${url}`, headers: this.getHeaders(url) }];
+            return [{ url: url, originalUrl: url, quality: `${serverName}: HLS\n${url}`, headers: this.getHeaders(url) }];
         }
     }
 
