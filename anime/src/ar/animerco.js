@@ -11,208 +11,11 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/animerco.js"
 }];
 
-
-
-class DoodExtractor {
-    constructor(client) {
-        this.client = client;
-    }
-
-    async videoFromUrl(url) {
-        try {
-            const response = await this.client.get(url, { "Referer": url });
-            const content = response.body;
-            if (!content.includes("'/pass_md5/")) return null;
-
-            const doodHost = new URL(url).origin;
-            const md5 = doodHost + content.match(/\/pass_md5\/[^']*/)[0];
-            const token = md5.split('/').pop();
-            const randomString = Array(10).fill(0).map(() => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".charAt(Math.floor(Math.random() * 62))).join('');
-            const expiry = Date.now();
-            const videoUrlStart = await this.client.get(md5, { "Referer": url }).body;
-            const videoUrl = `${videoUrlStart}${randomString}?token=${token}&expiry=${expiry}`;
-
-            return [{
-                url: videoUrl,
-                quality: "Doodstream",
-                headers: { "Referer": doodHost }
-            }];
-        } catch (e) {
-            return null;
-        }
-    }
-}
-
-class StreamTapeExtractor {
-    constructor(client) {
-        this.client = client;
-    }
-
-    async videoFromUrl(url) {
-        try {
-            const response = await this.client.get(url);
-            const doc = new Document(response.body, response.url);
-            const script = doc.selectFirst("script:containsData(document.getElementById('robotlink'))")?.text;
-            if (!script) return null;
-
-            const videoUrlPart1 = script.substringAfter("document.getElementById('robotlink').innerHTML = '").substringBefore("'");
-            const videoUrlPart2 = script.substringAfter("+ ('xcd").substringBefore("'");
-            if (!videoUrlPart1 || !videoUrlPart2) return null;
-
-            const videoUrl = "https:" + videoUrlPart1 + videoUrlPart2;
-            return [{
-                url: videoUrl,
-                quality: "StreamTape"
-            }];
-        } catch (e) {
-            return null;
-        }
-    }
-}
-
-class VidBomExtractor {
-    constructor(client) {
-        this.client = client;
-    }
-
-    async videosFromUrl(url) {
-        try {
-            const doc = new Document(await this.client.get(url).body, url);
-            const script = doc.selectFirst("script:containsData(sources)")?.text;
-            if (!script) return [];
-
-            const data = script.substringAfter("sources: [").substringBefore("],");
-            return data.split('file:"').slice(1).map(source => {
-                const src = source.substringBefore('"');
-                let quality = "Vidbom: " + source.substringAfter('label:"').substringBefore('"');
-                if (quality.length > 15) quality = "Vidshare: 480p"; // Heuristic from ref
-                return { url: src, quality };
-            });
-        } catch (e) {
-            return [];
-        }
-    }
-}
-
-class Mp4uploadExtractor {
-    constructor(client) {
-        this.client = client;
-    }
-    async videosFromUrl(url, headers) {
-        const newHeaders = { ...headers, "Referer": "https://mp4upload.com/" };
-        try {
-            const doc = new Document(await this.client.get(url, newHeaders).body, url);
-            let script = doc.selectFirst("script:containsData(player.src)")?.text;
-            if (script && script.includes("eval(function(p,a,c,k,e,d)")) {
-                script = MUtils.unpack(script);
-            }
-            if (!script) return [];
-
-            const videoUrl = script.substringAfter("player.src(").substringAfter("src:").substringAfter('"').substringBefore('"');
-            const resolution = script.match(/HEIGHT=(\d+)/)?.[1] || "HD";
-            return [{ url: videoUrl, quality: `Mp4Upload - ${resolution}p`, headers: newHeaders }];
-        } catch (e) {
-            return [];
-        }
-    }
-}
-
-class OkruExtractor {
-    constructor(client) {
-        this.client = client;
-    }
-    async videosFromUrl(url) {
-        try {
-            const doc = new Document(await this.client.get(url).body, url);
-            const dataOptions = doc.selectFirst("div[data-options]")?.attr("data-options");
-            if (!dataOptions) return [];
-
-            const videoJson = JSON.parse(dataOptions.replace(/&quot;/g, '"'));
-            const videos = videoJson.flashvars.metadataJson.videos;
-
-            return videos.map(video => ({
-                url: video.url,
-                quality: `Okru - ${video.name}`
-            })).sort((a,b) => parseInt(b.quality.match(/\d+/)) - parseInt(a.quality.match(/\d+/)));
-        } catch (e) {
-            // HLS fallback for newer players
-            try {
-                const pageText = await this.client.get(url).body;
-                const m3u8Url = pageText.match(/"(https:.*?\.m3u8.*?)"/)?.[1];
-                if(m3u8Url) return MUtils.playlist(m3u8Url, {Referer: url}, "Okru");
-            } catch(e) {}
-        }
-        return [];
-    }
-}
-
-class StreamWishExtractor {
-    constructor(client, headers) {
-        this.client = client;
-        this.headers = headers;
-    }
-
-    async videosFromUrl(url) {
-        try {
-            const embedUrl = url.includes("/e/") ? url : url.replace("/f/", "/e/");
-            const doc = new Document(await this.client.get(embedUrl, this.headers).body, embedUrl);
-            let scriptBody = doc.selectFirst("script:containsData(m3u8)")?.text;
-
-            if (scriptBody && scriptBody.includes("eval(function(p,a,c")) {
-                scriptBody = MUtils.unpack(scriptBody);
-            }
-            if (!scriptBody) return [];
-
-            const masterUrl = scriptBody.match(/file:"(.*?m3u8.*?)"/)?.[1];
-            if (!masterUrl) return [];
-
-            return MUtils.playlist(masterUrl, { Referer: "https://streamwish.to/" }, "StreamWish");
-        } catch (e) {
-            return [];
-        }
-    }
-}
-
-class YourUploadExtractor {
-    constructor(client) {
-        this.client = client;
-    }
-
-    async videoFromUrl(url, headers) {
-        const newHeaders = { ...headers, "Referer": "https://www.yourupload.com/" };
-        try {
-            const doc = new Document(await this.client.get(url, newHeaders).body, url);
-            const baseData = doc.selectFirst("script:containsData(jwplayerOptions)")?.text;
-            if (baseData) {
-                const videoUrl = baseData.substringAfter("file: '").substringBefore("',");
-                return [{ url: videoUrl, quality: "YourUpload", headers: newHeaders }];
-            }
-        } catch (e) {}
-        return [];
-    }
-}
-
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
         super();
         this.client = new Client();
-        // Instantiate extractors
-        this.doodExtractor = new DoodExtractor(this.client);
-        this.streamTapeExtractor = new StreamTapeExtractor(this.client);
-        this.vidBomExtractor = new VidBomExtractor(this.client);
-        this.mp4uploadExtractor = new Mp4uploadExtractor(this.client);
-        this.okruExtractor = new OkruExtractor(this.client);
-        this.streamWishExtractor = new StreamWishExtractor(this.client, this.getHeaders());
-        this.yourUploadExtractor = new YourUploadExtractor(this.client);
-        // List of domains for VidBom extractor
-        this.VIDBOM_DOMAINS = [
-            "vidbom.com", "vidbem.com", "vidbm.com", "vedpom.com",
-            "vedbom.com", "vedbom.org", "vadbom.com",
-            "vidbam.org", "myviid.com", "myviid.net",
-            "myvid.com", "vidshare.com", "vedsharr.com",
-            "vedshar.com", "vedshare.com", "vadshar.com", "vidshar.org",
-        ];
     }
 
     // --- PREFERENCES AND HEADERS ---
@@ -273,13 +76,23 @@ class DefaultExtension extends MProvider {
             const episodeUrl = item.selectFirst("div.info a")?.attr("href");
 
             if (name && imageUrl && seasonText && episodeUrl) {
+                // Step 1: Extract the full slug from the episode URL. This is more reliable than
+                // generating one from the short title. The regex captures the content between
+                // "/episodes/" and the URL-encoded Arabic word for "episode".
                 const slugMatch = episodeUrl.match(/\/episodes\/(.+?)-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-\d+/);
+
                 if (!slugMatch) continue;
                 let fullSlug = slugMatch[1];
+
+                // Step 2: Clean the extracted slug by removing any pre-existing "-season-X" suffix.
+                // This handles site inconsistencies where the season is sometimes included in the episode URL.
                 const baseSlug = fullSlug.replace(/-season-\d+$/, '');
+
                 const seasonMatch = seasonText.match(/(\d+)/);
                 if (!seasonMatch) continue;
                 const seasonNumber = seasonMatch[1];
+                
+                // Step 3: Construct the final, correct series link using the cleaned base slug.
                 const link = `/seasons/${baseSlug}-season-${seasonNumber}/`;
 
                 list.push({ name, imageUrl, link });
@@ -319,6 +132,7 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body, res.url);
 
         let name = doc.selectFirst("div.media-title > h1")?.text;
+        
         if (name) {
             name = name.replace(/\s+(season|الموسم)\s+\d+\s*$/i, '').trim();
         }
@@ -333,18 +147,26 @@ class DefaultExtension extends MProvider {
         const statusText = doc.selectFirst("div.status > a")?.text;
         let status = 5;
         if (statusText) {
-            if (statusText.includes("يعرض الأن")) status = 0;
-            else if (statusText.includes("مكتمل")) status = 1;
+            if (statusText.includes("يعرض الأن")) {
+                status = 0;
+            } else if (statusText.includes("مكتمل")) {
+                status = 1;
+            }
         }
 
         const genre = doc.select("div.genres a").map(e => e.text);
         const chapters = [];
         
         if (doc.location && doc.location.includes("/movies/")) {
-            chapters.push({ name: "Movie", url: url, scanlator: "1" });
+            chapters.push({
+                name: "Movie",
+                url: url,
+                scanlator: "1" // Movie "chapter" number
+            });
         } else {
             const seasonNameFromTitle = doc.selectFirst("div.media-title h1")?.text;
-            const seasonNum = parseInt(seasonNameFromTitle?.match(/(\d+)/)?.[1] || '1');
+            const seasonNumMatch = seasonNameFromTitle?.match(/(\d+)/);
+            const seasonNum = seasonNumMatch ? parseInt(seasonNumMatch[1]) : 1;
             
             const episodeElements = doc.select("ul.episodes-lists li");
             for (const ep of episodeElements) {
@@ -357,7 +179,11 @@ class DefaultExtension extends MProvider {
 
                 if (epText && !isNaN(epNum) && epUrl) {
                     const scanlator = parseFloat(`${seasonNum}.${String(epNum).padStart(3, '0')}`);
-                    chapters.push({ name: epText, url: epUrl.replace(this.getBaseUrl(), ""), scanlator: String(scanlator) });
+                    chapters.push({
+                        name: epText,
+                        url: epUrl.replace(this.getBaseUrl(), ""),
+                        scanlator: String(scanlator) // Ensure this is a string to avoid DB issues
+                    });
                 }
             }
         }
@@ -371,59 +197,36 @@ class DefaultExtension extends MProvider {
         const fullUrl = this.getBaseUrl() + url;
         const res = await this.client.get(fullUrl, this.getHeaders(fullUrl));
         const doc = new Document(res.body, res.url);
-        const players = doc.select("li.dooplay_player_option, ul.server-list > li > a");
+        const players = doc.select("li.dooplay_player_option");
+        const videos = [];
 
-        const videoPromises = players.map(async (player) => {
-            try {
-                const postData = {
-                    "action": "doo_player_ajax", // For dooplay_player_option
-                    "post": player.attr("data-post"),
-                    "nume": player.attr("data-nume"),
-                    "type": player.attr("data-type")
-                };
-
-                const playerRes = await this.client.post(`${this.getBaseUrl()}/wp-admin/admin-ajax.php`, postData, this.getHeaders(fullUrl));
-                const embedUrl = JSON.parse(playerRes.body).embed_url.replace(/\\/g, "");
-                const serverName = player.selectFirst("span.title, span.server")?.text.toLowerCase() ?? "unknown";
-
-                if (!embedUrl) return [];
-
-                // Use the appropriate extractor based on the URL or server name
-                if (embedUrl.includes("ok.ru")) {
-                    return this.okruExtractor.videosFromUrl(embedUrl);
-                }
-                if (embedUrl.includes("mp4upload")) {
-                    return this.mp4uploadExtractor.videosFromUrl(embedUrl, this.getHeaders(embedUrl));
-                }
-                if (serverName.includes("wish") || embedUrl.includes("wish")) {
-                    return this.streamWishExtractor.videosFromUrl(embedUrl);
-                }
-                if (embedUrl.includes("yourupload")) {
-                    return this.yourUploadExtractor.videoFromUrl(embedUrl, this.getHeaders(embedUrl));
-                }
-                if (embedUrl.includes("dood")) {
-                    return this.doodExtractor.videoFromUrl(embedUrl);
-                }
-                if (embedUrl.includes("streamtape")) {
-                    return this.streamTapeExtractor.videoFromUrl(embedUrl);
-                }
-                if (this.VIDBOM_DOMAINS.some(domain => embedUrl.includes(domain))) {
-                    return this.vidBomExtractor.videosFromUrl(embedUrl);
-                }
-                
-                // Fallback for other servers not explicitly handled
-                return MUtils.extract(embedUrl, serverName);
-
-            } catch (e) {
-                console.error(`Failed to process player: ${e}`);
-                return [];
-            }
+        const promises = players.map(player => {
+            const postData = {
+                "action": "doo_player_ajax",
+                "post": player.attr("data-post"),
+                "nume": player.attr("data-nume"),
+                "type": player.attr("data-type")
+            };
+            const serverName = player.selectFirst("span.title")?.text ?? "Unknown Server";
+            return this.client.post(`${this.getBaseUrl()}/wp-admin/admin-ajax.php`, postData, this.getHeaders(fullUrl))
+                .then(playerRes => ({ playerRes, serverName }));
         });
 
-        const allVideos = (await Promise.all(videoPromises)).flat().filter(v => v);
+        const results = await Promise.all(promises);
 
+        for (const { playerRes, serverName } of results) {
+            try {
+                const embedUrl = JSON.parse(playerRes.body).embed_url.replace(/\\/g, "");
+                if (embedUrl) {
+                    videos.push({ url: embedUrl, quality: serverName, headers: this.getHeaders(embedUrl) });
+                }
+            } catch (e) {
+                console.error(`Failed to parse player response for ${serverName}: ${e}`);
+            }
+        }
+        
         const quality = this.getPreference("preferred_quality") || "1080";
-        allVideos.sort((a, b) => {
+        videos.sort((a, b) => {
             const aQuality = a.quality.toLowerCase();
             const bQuality = b.quality.toLowerCase();
             if (aQuality.includes(quality.toLowerCase())) return -1;
@@ -431,7 +234,7 @@ class DefaultExtension extends MProvider {
             return 0;
         });
 
-        return allVideos;
+        return videos;
     }
 
     getFilterList() {
