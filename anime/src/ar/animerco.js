@@ -1,4 +1,3 @@
-// --- METADATA ---
 const mangayomiSources = [{
     "name": "Animerco",
     "id": 645698215,
@@ -11,7 +10,6 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/animerco.js"
 }];
 
-// --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -263,3 +261,4 @@ class DefaultExtension extends MProvider {
         }];
     }
 }
+
