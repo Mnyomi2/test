@@ -58,7 +58,6 @@ class DefaultExtension extends MProvider {
         return new SharedPreferences().get(key);
     }
 
-    // FIX: Enhanced getHeaders to include Origin for better hotlink protection.
     getHeaders(url) {
         const headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
@@ -67,9 +66,7 @@ class DefaultExtension extends MProvider {
             headers["Referer"] = url;
             try {
                 headers["Origin"] = new URL(url).origin;
-            } catch (e) {
-                // In case of an invalid URL, we can't get origin.
-            }
+            } catch (e) {}
         } else {
             headers["Referer"] = this.getBaseUrl() + "/";
         }
@@ -81,10 +78,6 @@ class DefaultExtension extends MProvider {
     }
 
     // --- HELPER METHODS ---
-
-    _createFallbackVideo(url, quality) {
-        return { url, originalUrl: url, quality, headers: this.getHeaders(url) };
-    }
     
     _getPathFromUrl(fullUrl) {
         try {
@@ -92,6 +85,15 @@ class DefaultExtension extends MProvider {
         } catch (e) {
             return fullUrl.replace(/^(https?:\/\/)?[^\/]+/, '');
         }
+    }
+
+    _getQualityFromString(text) {
+        const t = text.toLowerCase();
+        if (t.includes("fhd") || t.includes("1080")) return { label: "FHD", numeric: "1080" };
+        if (t.includes("hd") || t.includes("720")) return { label: "HD", numeric: "720" };
+        if (t.includes("sd") || t.includes("480")) return { label: "SD", numeric: "480" };
+        if (t.includes("low") || t.includes("360")) return { label: "LOW", numeric: "360" };
+        return { label: "UNK", numeric: "0" };
     }
 
     async parseCataloguePage(url) {
@@ -225,27 +227,22 @@ class DefaultExtension extends MProvider {
         return embedUrl;
     }
     
-    async extractVideos(url, qualityPrefix) {
+    async extractVideos(url, hostKey, qualityLabel, qualityNumeric) {
         const handlers = {
-            "mp4upload.com": this.mp4uploadExtractor,
-            "dood": this.doodstreamExtractor,
-            "voe.sx": this.voeExtractor,
-            "upbaam.com": this.upbomExtractor,
-            "cdnupbom.com": this.upbomExtractor,
-            "uupbom.com": this.upbomExtractor,
-            "upgobom.space": this.upbomExtractor,
-            "tgb4.top15top.shop": this.upbomExtractor,
-            "updown.cam": this.upbomExtractor, // FIX: Added new domain.
+            "Mp4upload": this.mp4uploadExtractor,
+            "Dood": this.doodstreamExtractor,
+            "Voe": this.voeExtractor,
+            "Upbom": this.upbomExtractor,
         };
-        for (const [domain, handler] of Object.entries(handlers)) {
-            if (url.includes(domain)) {
-                return handler.call(this, url, qualityPrefix);
-            }
+
+        const extractor = handlers[hostKey];
+        if (extractor) {
+            return extractor.call(this, url, hostKey, qualityLabel, qualityNumeric);
         }
-        return [this._createFallbackVideo(url, qualityPrefix)];
+        return [];
     }
 
-    async mp4uploadExtractor(url, qualityPrefix) {
+    async mp4uploadExtractor(url, hostKey, qualityLabel, qualityNumeric) {
         try {
             const fileId = url.split('/').pop();
             if (!fileId) { throw new Error("Could not extract file ID."); }
@@ -254,15 +251,15 @@ class DefaultExtension extends MProvider {
             const sourceMatch = res.body.match(/player\.src\({[\s\S]*?src:\s*["']([^"']+)["']/);
             if (sourceMatch?.[1]) {
                 const finalVideoUrl = sourceMatch[1];
-                return [{ url: finalVideoUrl, originalUrl: url, quality: `${qualityPrefix} - ${finalVideoUrl}`, headers: this.getHeaders(embedUrl) }];
+                return [{ url: finalVideoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p`, headers: this.getHeaders(embedUrl) }];
             } else { throw new Error("Could not find final video source."); }
         } catch (e) {
             console.error(`[Mp4Upload Error] ${url}`, e.message);
-            return [this._createFallbackVideo(url, qualityPrefix)];
+            return [];
         }
     }
     
-    async doodstreamExtractor(url, qualityPrefix) {
+    async doodstreamExtractor(url, hostKey, qualityLabel, qualityNumeric) {
         try {
             const res = await this.client.get(url, this.getHeaders(url));
             const md5 = res.body.match(/\/pass_md5\/([^']*)'/);
@@ -271,19 +268,17 @@ class DefaultExtension extends MProvider {
                 const passRes = await this.client.get(passMd5Url, this.getHeaders(url));
                 const randomString = (Math.random() + 1).toString(36).substring(7);
                 const videoUrl = `${passRes.body}${randomString}?token=${md5[1]}&expiry=${Date.now()}`;
-                return [{ url: videoUrl, originalUrl: url, quality: `${qualityPrefix} - ${videoUrl}`, headers: this.getHeaders(url) }];
+                return [{ url: videoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p`, headers: this.getHeaders(url) }];
             }
         } catch (e) {
             console.error(`[Doodstream Error] ${url}`, e.message);
-            return [this._createFallbackVideo(url, qualityPrefix)];
         }
-        return [this._createFallbackVideo(url, qualityPrefix)];
+        return [];
     }
     
-    async upbomExtractor(url, qualityPrefix) {
+    async upbomExtractor(url, hostKey, qualityLabel, qualityNumeric) {
         try {
             const headers = this.getHeaders(url);
-            
             const initialRes = await this.client.get(url, headers);
             const initialHtml = initialRes.body;
             const doc = new Document(initialHtml);
@@ -293,12 +288,11 @@ class DefaultExtension extends MProvider {
                 const formData = {};
                 inputs.forEach(i => { formData[i.attr("name")] = i.attr("value"); });
                 formData['method_free'] = 'Free Download >>';
-
                 const postRes1 = await this.client.post(url, headers, formData);
                 let m = postRes1.body.match(/direct_link[^>]+>\s*<a\s*href="([^"]+)"/i);
                 if (m && m[1]) {
                     const videoUrl = m[1].replace(/\s/g, '%20');
-                    return [{ url: videoUrl, originalUrl: url, quality: `${qualityPrefix} - ${videoUrl}`, headers: this.getHeaders(url) }];
+                    return [{ url: videoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p`, headers: this.getHeaders(url) }];
                 }
             }
 
@@ -308,87 +302,94 @@ class DefaultExtension extends MProvider {
             let m2 = postRes2.body.match(/direct_link[^>]+>\s*<a\s*href="([^"]+)"/i);
             if (m2 && m2[1]) {
                 const videoUrl = m2[1].replace(/\s/g, '%20');
-                return [{ url: videoUrl, originalUrl: url, quality: `${qualityPrefix} - ${videoUrl}`, headers: this.getHeaders(url) }];
+                return [{ url: videoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p`, headers: this.getHeaders(url) }];
             }
-
-            const regex = /https?:\/\/[^\s"'<>]{30,}/g;
-            const matches = [...initialHtml.matchAll(regex)];
-            for (const match of matches) {
-                const candidate = match[0].replace(/\s/g, '%20');
-                if (/\/d\//i.test(candidate)) {
-                    return [{ url: candidate, originalUrl: url, quality: `${qualityPrefix} - ${candidate} (Regex Fallback)`, headers: this.getHeaders(url) }];
-                }
-            }
-
             throw new Error("All upbom extraction methods failed.");
         } catch (e) {
             console.error(`[UpbomExtractor Error] ${url}`, e.message);
-            return [this._createFallbackVideo(url, qualityPrefix)];
         }
+        return [];
     }
 
-    async voeExtractor(url, qualityPrefix) {
+    async voeExtractor(url, hostKey, qualityLabel, qualityNumeric) {
         try {
             const res = await this.client.get(url, this.getHeaders(url));
             const hlsUrlMatch = res.body.match(/'hls':\s*'([^']+)'/);
             if (hlsUrlMatch?.[1]) {
                 const videoUrl = hlsUrlMatch[1];
-                return [{ url: videoUrl, originalUrl: url, quality: `${qualityPrefix} - ${videoUrl} (HLS)`, headers: this.getHeaders(url) }];
+                return [{ url: videoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p (HLS)`, headers: this.getHeaders(url) }];
             }
         } catch (e) {
             console.error(`[Voe Error] ${url}`, e.message);
-            return [this._createFallbackVideo(url, qualityPrefix)];
         }
-        return [this._createFallbackVideo(url, qualityPrefix)];
+        return [];
     }
 
     async getVideoList(url) {
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders());
         const doc = new Document(res.body);
-        const videos = [];
-
-        // --- Process Streaming Servers ---
+        let videos = [];
+        
+        const handlers = {
+            "Mp4upload": { domains: ["mp4upload.com"] },
+            "Dood":      { domains: ["dood"] },
+            "Voe":       { domains: ["voe.sx"] },
+            "Upbom":     { domains: ["upbaam.com", "cdnupbom.com", "uupbom.com", "upgobom.space", "tgb4.top15top.shop", "megamax.me"] },
+        };
+        const hosterSelection = this.getPreference("hoster_selection") || Object.keys(handlers);
+        
+        // --- Step 1: Gather and de-duplicate all links ---
+        const linksToProcess = [];
+        const processedUrls = new Set();
+        
         const script = doc.selectFirst(C.SELECTORS.VIDEO.script)?.data;
         if (script) {
             const version = script.substringAfter("ver\":\"").substringBefore("\"");
             const serverElements = doc.select(C.SELECTORS.VIDEO.servers);
-            const serverPromises = serverElements.map(async (serverElement) => {
-                const serverName = serverElement.text.trim();
+            for (const element of serverElements) {
                 try {
-                    const embedUrl = await this._getEmbedUrlForServer(serverElement, version);
-                    if (embedUrl) {
-                        return await this.extractVideos(embedUrl, serverName);
+                    const embedUrl = await this._getEmbedUrlForServer(element, version);
+                    if (embedUrl && !processedUrls.has(embedUrl)) {
+                        linksToProcess.push({ url: embedUrl, qualityText: element.text.trim() });
+                        processedUrls.add(embedUrl);
                     }
-                } catch (e) {
-                    console.error(`[Server Extraction Error] ${serverName}`, e.message);
-                }
-                return [];
-            });
-            const extractedServerVideos = await Promise.all(serverPromises);
-            videos.push(...extractedServerVideos.flat());
+                } catch(e) {}
+            }
         }
 
-        // --- Process Download Links ---
         const downloadElements = doc.select(C.SELECTORS.VIDEO.downloads);
-        
         for (const element of downloadElements) {
             const downloadUrl = element.getHref;
-            const qualityInfo = element.selectFirst(C.SELECTORS.VIDEO.downloadQuality)?.text ?? "Download";
-            const qualityPrefix = `Download ${qualityInfo} (${downloadUrl})`;
-            
-            const extractedDownloadVideos = await this.extractVideos(downloadUrl, qualityPrefix);
-            videos.push(...extractedDownloadVideos);
+            if (downloadUrl && !processedUrls.has(downloadUrl)) {
+                linksToProcess.push({ url: downloadUrl, qualityText: element.selectFirst("em")?.text ?? "Download" });
+                processedUrls.add(downloadUrl);
+            }
         }
 
-        // --- Sort and Finalize ---
+        // --- Step 2: Filter and process the unique links ---
+        const videoPromises = linksToProcess.map(async (link) => {
+            for (const hostKey of hosterSelection) {
+                const handlerInfo = handlers[hostKey];
+                if (handlerInfo && handlerInfo.domains.some(domain => link.url.includes(domain))) {
+                    const quality = this._getQualityFromString(link.qualityText);
+                    return await this.extractVideos(link.url, hostKey, quality.label, quality.numeric);
+                }
+            }
+            return []; // Return empty array if host is not selected
+        });
+        
+        const extractedVideos = await Promise.all(videoPromises);
+        videos.push(...extractedVideos.flat());
+
+        // --- Step 3: Sort the final list ---
         const preferredQuality = this.getPreference("preferred_quality") || "1080";
         videos.sort((a, b) => {
             const aIsPreferred = a.quality.includes(preferredQuality);
             const bIsPreferred = b.quality.includes(preferredQuality);
             if (aIsPreferred !== bIsPreferred) return aIsPreferred ? -1 : 1;
 
-            const qualityA = parseInt(a.quality.match(/(\d+)p?/)?.[1] || 0);
-            const qualityB = parseInt(b.quality.match(/(\d+)p?/)?.[1] || 0);
+            const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0);
+            const qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
             return qualityB - qualityA;
         });
 
@@ -451,8 +452,17 @@ class DefaultExtension extends MProvider {
                 title: "الجودة المفضلة",
                 summary: "اختر الجودة التي تفضلها",
                 valueIndex: 0,
-                entries: ["1080p", "720p", "480p", "360p", "240p"],
-                entryValues: ["1080", "720", "480", "360", "240"],
+                entries: ["1080p", "720p", "480p", "360p"],
+                entryValues: ["1080", "720", "480", "360"],
+            }
+        }, {
+            key: "hoster_selection",
+            multiSelectListPreference: {
+                title: "اختر الخوادم",
+                summary: "اختر الخوادم التي تريد ان تظهر",
+                entries: ["Mp4upload", "Dood", "Voe", "Upbom Family"],
+                entryValues: ["Mp4upload", "Dood", "Voe", "Upbom"],
+                values: ["Mp4upload", "Dood", "Voe", "Upbom"],
             }
         }];
     }
