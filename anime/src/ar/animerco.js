@@ -1,3 +1,4 @@
+// --- METADATA ---
 const mangayomiSources = [{
     "name": "Animerco",
     "id": 645698215,
@@ -261,4 +262,5 @@ class DefaultExtension extends MProvider {
         }];
     }
 }
+
 
