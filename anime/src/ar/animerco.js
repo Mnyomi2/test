@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=animerco.org",
     "typeSource": "single",
     "itemType": 1,
-    "version": "1.0.1",
+    "version": "1.0.0",
     "pkgPath": "anime/src/ar/animerco.js"
 }];
 
@@ -459,6 +459,4 @@ class DefaultExtension extends MProvider {
             }
         }];
     }
-
 }
-
