@@ -407,17 +407,18 @@ class DefaultExtension extends MProvider {
             state: 0,
             values: [
                 { name: "اختر", value: "none" },
-                { name: "افلام اجنبي", value: "aflam-online" },
-                { name: "افلام نتفليكس", value: "netflix-movies" },
-                { name: "افلام هندي", value: "indian-movies" },
-                { name: "افلام اسيوي", value: "asian-aflam" },
+                // Movies from HTML
+                { name: "افلام اجنبية", value: "aflam-online-1" },
+                { name: "افلام نتفليكس", value: "netflix-movies-1" },
+                { name: "افلام اسيوية", value: "asian-aflam" },
+                { name: "افلام هندية", value: "indian-movies" },
                 { name: "افلام كرتون", value: "cartoon-movies" },
                 { name: "افلام انمي", value: "anime-movies" },
-                { name: "مسلسلات اجنبي", value: "english-series" },
+                // Series from HTML
+                { name: "مسلسلات اجنبية", value: "english-series-1" },
                 { name: "مسلسلات نتفليكس", value: "netflix-series" },
-                { name: "مسلسلات اسيوي", value: "asian-series" },
-                { name: "مسلسلات كرتون", value: "anime-series" },
-                { name: "مسلسلات انمي", value: "netflix-anime" },
+                { name: "مسلسلات اسيوية", value: "asian-series" },
+                { name: "مسلسلات انمي", value: "anime-series" },
             ].map(v => ({...v, type_name: "SelectOption"}))
         }, {
             type_name: "SeparatorFilter"
@@ -438,9 +439,13 @@ class DefaultExtension extends MProvider {
             name: "التصنيف",
             state: 0,
             values: [
+                // Existing Genres
                 "Action", "Adventure", "Animation", "Western", "Documentary", "Fantasy", 
                 "Science-fiction", "Romance", "Comedy", "Family", "Drama", "Thriller", 
-                "Crime", "Horror"
+                "Crime", "Horror",
+                // Added Genres
+                "History", "Kids", "Music", "Mystery", "Reality", "Sci-Fi-Fantasy",
+                "TV-Movie", "War", "thriller"
             ].sort().map(g => ({ type_name: "SelectOption", name: g, value: g }))
         }];
     }
