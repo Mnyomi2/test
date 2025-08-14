@@ -44,7 +44,7 @@
         "notes": ""
     },
     {
-        "name": "سيما ليك",
+        "name": "Cimalek",
         "id": 5798993892749847,
         "baseUrl": "https://cimalek.art",
         "lang": "ar",
@@ -54,9 +54,9 @@
         "dateFormatLocale": "",
         "isNsfw": false,
         "hasCloudflare": false,
-        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/cimaleek.js",
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/cimalek.js",
         "apiUrl": "",
-        "version": "1.0.0",
+        "version": "1.2.3",
         "isManga": false,
         "itemType": 1,
         "isFullData": false,
@@ -131,5 +131,4 @@
         "sourceCodeLanguage": 1,
         "notes": ""
     }
-
 ]
