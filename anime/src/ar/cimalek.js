@@ -366,7 +366,7 @@ class DefaultExtension extends MProvider {
             const embedUrl = `https://www.mp4upload.com/embed-${fileId}.html`;
             const res = await this.client.get(embedUrl, this.getHeaders(url));
             
-            const sourceMatch = res.body.match(/sources:\s*\[\s*\{\s*src:\s*["']([^"']+)["']/);
+            const sourceMatch = res.body.match(/player\.src\({[\s\S]*?src:\s*["']([^"']+)["']/);
             if (sourceMatch?.[1]) {
                 const finalVideoUrl = sourceMatch[1].trim();
                 return [{ url: finalVideoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p`, headers: this.getHeaders(embedUrl) }];
