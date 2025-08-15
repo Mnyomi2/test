@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cimalek.art",
     "typeSource": "single",
     "itemType": 1,
-    "version": "1.2.3",
+    "version": "1.4.1",
     "pkgPath": "anime/src/ar/cimalek.js"
 }];
 
@@ -38,10 +38,9 @@ const C = {
         }
     },
     PATHS: {
-        trending: "/trending/page/",
-        latest: "/recent-89541/page/",
-        search: "/page/",
-        category: "/category/",
+        trending: "/trending/",
+        latest: "/recent-89541/",
+        search: "/",
         genre: "/genre/",
         watchSuffix: "watch/",
         api: "/wp-json/lalaplayer/v2/"
@@ -60,7 +59,7 @@ class DefaultExtension extends MProvider {
 
     getHeaders(url) {
         const headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5.37.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
         };
         if (url) {
             headers["Referer"] = url;
@@ -73,12 +72,15 @@ class DefaultExtension extends MProvider {
         return headers;
     }
 
-    // UPDATED getBaseUrl to use preference
     getBaseUrl() {
-        return this.getPreference("override_base_url") || this.source.baseUrl;
+        return (this.getPreference("override_base_url") || this.source.baseUrl).trim();
     }
 
     // --- HELPER METHODS ---
+
+    _sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
     
     _getPathFromUrl(fullUrl) {
         try {
@@ -105,12 +107,31 @@ class DefaultExtension extends MProvider {
 
         for (const item of items) {
             const linkElement = item.selectFirst(C.SELECTORS.CATALOGUE.link);
-            const name = item.selectFirst(C.SELECTORS.CATALOGUE.name)?.text?.trim();
+            let name = item.selectFirst(C.SELECTORS.CATALOGUE.name)?.text?.trim();
             const imageUrl = item.selectFirst(C.SELECTORS.CATALOGUE.image)?.attr("data-src");
 
             if (linkElement && name && imageUrl) {
+                // --- NEW Rich Title Logic ---
+                name = name.replace(/^مسلسل|^فيلم|^انمي/g, "").trim();
+
+                const descElements = item.select(".data .desc");
+                let extraInfo = "";
+                if (descElements.length > 0) {
+                    extraInfo = descElements.map(e => e.text.trim()).join(" ");
+                }
+                
+                let finalName = name;
+                if (extraInfo) {
+                    if (/^\d{4}$/.test(extraInfo)) {
+                        finalName = `${name} (${extraInfo})`;
+                    } else {
+                        finalName = `${name} ${extraInfo}`;
+                    }
+                }
+                // --- End of Rich Title Logic ---
+
                 const link = this._getPathFromUrl(linkElement.getHref);
-                list.push({ name, imageUrl, link });
+                list.push({ name: finalName, imageUrl, link });
             }
         }
 
@@ -130,25 +151,65 @@ class DefaultExtension extends MProvider {
     // --- CORE METHODS ---
 
     async getPopular(page) {
-        const url = `${this.getBaseUrl()}${C.PATHS.trending}${page}/`;
+        const url = `${this.getBaseUrl()}${C.PATHS.trending}page/${page}/`;
         return await this.parseCataloguePage(url);
     }
 
     async getLatestUpdates(page) {
-        const url = `${this.getBaseUrl()}${C.PATHS.latest}${page}/`;
+        const url = `${this.getBaseUrl()}${C.PATHS.latest}page/${page}/`;
         return await this.parseCataloguePage(url);
     }
 
     async search(query, page, filters) {
         if (query) {
-            const url = `${this.getBaseUrl()}${C.PATHS.search}${page}?s=${encodeURIComponent(query)}`;
+            const url = `${this.getBaseUrl()}${C.PATHS.search}page/${page}?s=${encodeURIComponent(query)}`;
             return this.parseCataloguePage(url);
         }
 
-        const sectionFilter = filters.find(f => f.name === "اقسام الموقع");
-        if (sectionFilter?.state !== 0) {
-            const value = sectionFilter.values[sectionFilter.state].value;
-            const url = `${this.getBaseUrl()}${C.PATHS.category}${value}/page/${page}/`;
+        const sectionFilter = filters.find(f => f.name === "القسم");
+        const sectionValue = sectionFilter.values[sectionFilter.state].value;
+
+        if (sectionValue !== "none") {
+            let path;
+            switch (sectionValue) {
+                case "popular":
+                    path = C.PATHS.trending;
+                    break;
+                case "latest":
+                    path = C.PATHS.latest;
+                    break;
+                case "latest-movies":
+                    path = "/recent-89541/movies/";
+                    break;
+                case "latest-series":
+                    path = "/recent-89541/series/";
+                    break;
+                case "latest-animes":
+                    path = "/recent-89541/animes/";
+                    break;
+                case "latest-episodes":
+                    path = "/recent-89541/episodes/";
+                    break;
+                case "latest-anime-episodes":
+                    path = "/recent-89541/anime-episodes/";
+                    break;
+                case "movies":
+                    path = "/movies/";
+                    break;
+                case "series":
+                    path = "/series/";
+                    break;
+                case "seasons":
+                    path = "/seasons/";
+                    break;
+                case "episodes":
+                    path = "/episodes/";
+                    break;
+                default:
+                    path = `/${sectionValue}/`;
+                    break;
+            }
+            const url = `${this.getBaseUrl()}${path}page/${page}/`;
             return this.parseCataloguePage(url);
         }
         
@@ -170,11 +231,65 @@ class DefaultExtension extends MProvider {
 
         const name = doc.selectFirst(C.SELECTORS.DETAIL.name)?.text?.trim() ?? "";
         const imageUrl = doc.selectFirst(C.SELECTORS.DETAIL.imageUrl)?.attr("src") ?? "";
-        const description = doc.selectFirst(C.SELECTORS.DETAIL.description)?.text?.trim() ?? "";
-        const genre = doc.select(C.SELECTORS.DETAIL.genre).map(e => e.text.trim());
         const author = doc.selectFirst(C.SELECTORS.DETAIL.author)?.text?.trim() ?? "";
+        const genre = doc.select(C.SELECTORS.DETAIL.genre).map(e => e.text.trim());
         const status = url.includes("/movies/") ? 1 : 5;
 
+        const originalDescription = doc.selectFirst(C.SELECTORS.DETAIL.description)?.text?.trim() ?? "";
+
+        const keyMap = {
+            "الاسم الاصلي": "originalName", "عنوان الحلقة": "episodeTitle", "البلد المنشئ": "country",
+            "الموسم": "seasons", "عد المواسم": "seasons", "الموسم الحالي": "currentSeason",
+            "الحلقة": "episodes", "عدد الحلقات": "episodes", "عرض في": "startDate", "انتهى في": "endDate",
+            "التصنيف العمري": "ageRating", "مدة كل حلقة": "episodeDuration", "اللغة": "language",
+            "تاريخ العرض": "releaseDate", "تاريخ عرض الحلقة": "episodeReleaseDate",
+            "تاريخ عرض الموسم": "seasonReleaseDate", "المدة": "duration"
+        };
+
+        const ordinalMap = {
+            "الاول": "1", "الثاني": "2", "الثالث": "3", "الرابع": "4", "الخامس": "5",
+            "السادس": "6", "السابع": "7", "الثامن": "8", "التاسع": "9", "العاشر": "10"
+        };
+        
+        const processValue = (value) => {
+            const trimmedValue = value.trim();
+            if (ordinalMap[trimmedValue]) {
+                return ordinalMap[trimmedValue];
+            }
+            if (trimmedValue.includes("دقيقة")) {
+                return trimmedValue.replace("دقيقة", "minutes").trim();
+            }
+            return trimmedValue;
+        };
+
+        const camelCaseToTitle = (s) => s.replace(/([A-Z])/g, ' $1').replace(/^./, (str) => str.toUpperCase());
+        
+        const moreInfo = [];
+        const infoItems = doc.select("div.anisc-more-info div.item");
+
+        for (const item of infoItems) {
+            const arabicHeadRaw = item.selectFirst(".item-head")?.text?.trim();
+            const rawValue = item.selectFirst("span:last-child")?.text?.trim();
+
+            if (arabicHeadRaw && rawValue) {
+                const processedValue = processValue(rawValue);
+                const arabicHead = arabicHeadRaw.replace(":", "").trim();
+                const englishKey = keyMap[arabicHead];
+
+                if (englishKey) {
+                    const englishLabel = camelCaseToTitle(englishKey);
+                    moreInfo.push(`${englishLabel}: ${processedValue}`);
+                } else {
+                    moreInfo.push(`${arabicHeadRaw} ${processedValue}`);
+                }
+            }
+        }
+
+        let finalDescription = originalDescription;
+        if (moreInfo.length > 0) {
+            finalDescription += `\n\n────────────────────\n\n${moreInfo.join("\n")}`;
+        }
+        
         let chapters = [];
         const isMovie = url.includes("/movies/");
 
@@ -206,7 +321,7 @@ class DefaultExtension extends MProvider {
             chapters = episodesBySeason.flat().reverse();
         }
 
-        return { name, imageUrl, description, author, link: url, status, genre, chapters };
+        return { name, imageUrl, description: finalDescription, author, link: url, status, genre, chapters };
     }
     
     // --- VIDEO EXTRACTION ---
@@ -245,15 +360,19 @@ class DefaultExtension extends MProvider {
 
     async mp4uploadExtractor(url, hostKey, qualityLabel, qualityNumeric) {
         try {
-            const fileId = url.split('/').pop();
-            if (!fileId) { throw new Error("Could not extract file ID."); }
+            const fileId = url.split('/').pop()?.trim();
+            if (!fileId) throw new Error("Could not extract file ID.");
+            
             const embedUrl = `https://www.mp4upload.com/embed-${fileId}.html`;
             const res = await this.client.get(embedUrl, this.getHeaders(url));
-            const sourceMatch = res.body.match(/player\.src\({[\s\S]*?src:\s*["']([^"']+)["']/);
+            
+            const sourceMatch = res.body.match(/sources:\s*\[\s*\{\s*src:\s*["']([^"']+)["']/);
             if (sourceMatch?.[1]) {
-                const finalVideoUrl = sourceMatch[1];
+                const finalVideoUrl = sourceMatch[1].trim();
                 return [{ url: finalVideoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p`, headers: this.getHeaders(embedUrl) }];
-            } else { throw new Error("Could not find final video source."); }
+            } else { 
+                throw new Error("Could not find final video source."); 
+            }
         } catch (e) {
             console.error(`[Mp4Upload Error] ${url}`, e.message);
             return [];
@@ -262,37 +381,48 @@ class DefaultExtension extends MProvider {
     
     async doodstreamExtractor(url, hostKey, qualityLabel, qualityNumeric) {
         try {
-            const res = await this.client.get(url, this.getHeaders(url));
-            const md5 = res.body.match(/\/pass_md5\/([^']*)'/);
-            if (md5?.[1]) {
-                const passMd5Url = `https://dood.yt/${md5[1]}`;
-                const passRes = await this.client.get(passMd5Url, this.getHeaders(url));
-                const randomString = (Math.random() + 1).toString(36).substring(7);
-                const videoUrl = `${passRes.body}${randomString}?token=${md5[1]}&expiry=${Date.now()}`;
-                return [{ url: videoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p`, headers: this.getHeaders(url) }];
+            for (let i = 0; i < 3; i++) {
+                const res = await this.client.get(url, this.getHeaders(url));
+                const md5Match = res.body.match(/\/pass_md5\/([^']*)'/);
+    
+                if (md5Match?.[1]) {
+                    const passMd5Url = `https://dood.yt${md5Match[1]}`;
+                    const passRes = await this.client.get(passMd5Url, this.getHeaders(url));
+    
+                    if (!passRes.body) {
+                        await this._sleep(800);
+                        continue;
+                    }
+    
+                    const videoPart = passRes.body;
+                    const randomString = this.generateRandomString(10);
+                    const finalToken = md5Match[1].split('/').pop(); 
+                    const videoUrl = `${videoPart}${randomString}?token=${finalToken}&expiry=${Date.now()}`;
+                    return [{ url: videoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p`, headers: this.getHeaders(url) }];
+                }
             }
+            throw new Error("Failed to extract Doodstream link after retries.");
         } catch (e) {
             console.error(`[Doodstream Error] ${url}`, e.message);
+            return [];
         }
-        return [];
     }
     
     async upbomExtractor(url, hostKey, qualityLabel, qualityNumeric) {
         try {
             const headers = this.getHeaders(url);
             const initialRes = await this.client.get(url, headers);
-            const initialHtml = initialRes.body;
-            const doc = new Document(initialHtml);
+            const doc = new Document(initialRes.body);
 
             const inputs = doc.select('form[name="F1"] input[type="hidden"]');
             if (inputs.length > 0) {
                 const formData = {};
                 inputs.forEach(i => { formData[i.attr("name")] = i.attr("value"); });
                 formData['method_free'] = 'Free Download >>';
-                const postRes1 = await this.client.post(url, headers, formData);
-                let m = postRes1.body.match(/direct_link[^>]+>\s*<a\s*href="([^"]+)"/i);
+                const postRes = await this.client.post(url, headers, formData);
+                let m = postRes.body.match(/direct_link[^>]+>\s*<a\s*href="([^"]+)"/i);
                 if (m && m[1]) {
-                    const videoUrl = m[1].replace(/\s/g, '%20');
+                    const videoUrl = m[1].replace(/\s/g, '%20').trim();
                     return [{ url: videoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p`, headers: this.getHeaders(url) }];
                 }
             }
@@ -302,14 +432,15 @@ class DefaultExtension extends MProvider {
             const postRes2 = await this.client.post(url, headers, formData2);
             let m2 = postRes2.body.match(/direct_link[^>]+>\s*<a\s*href="([^"]+)"/i);
             if (m2 && m2[1]) {
-                const videoUrl = m2[1].replace(/\s/g, '%20');
+                const videoUrl = m2[1].replace(/\s/g, '%20').trim();
                 return [{ url: videoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p`, headers: this.getHeaders(url) }];
             }
-            throw new Error("All upbom extraction methods failed.");
+
+            throw new Error("All Upbom extraction methods failed.");
         } catch (e) {
             console.error(`[UpbomExtractor Error] ${url}`, e.message);
+            return [];
         }
-        return [];
     }
 
     async voeExtractor(url, hostKey, qualityLabel, qualityNumeric) {
@@ -317,13 +448,14 @@ class DefaultExtension extends MProvider {
             const res = await this.client.get(url, this.getHeaders(url));
             const hlsUrlMatch = res.body.match(/'hls':\s*'([^']+)'/);
             if (hlsUrlMatch?.[1]) {
-                const videoUrl = hlsUrlMatch[1];
+                const videoUrl = hlsUrlMatch[1].trim();
                 return [{ url: videoUrl, originalUrl: url, quality: `${hostKey} - ${qualityLabel} ${qualityNumeric}p (HLS)`, headers: this.getHeaders(url) }];
             }
+            throw new Error("Could not find HLS URL in Voe page.");
         } catch (e) {
             console.error(`[Voe Error] ${url}`, e.message);
+            return [];
         }
-        return [];
     }
 
     async getVideoList(url) {
@@ -339,7 +471,6 @@ class DefaultExtension extends MProvider {
         };
         const hosterSelection = this.getPreference("hoster_selection") || Object.keys(handlers);
         
-        // --- Step 1: Gather and de-duplicate all links ---
         const linksToProcess = [];
         const processedUrls = new Set();
         
@@ -367,7 +498,6 @@ class DefaultExtension extends MProvider {
             }
         }
 
-        // --- Step 2: Filter and process the unique links ---
         const videoPromises = linksToProcess.map(async (link) => {
             for (const hostKey of hosterSelection) {
                 const handlerInfo = handlers[hostKey];
@@ -376,13 +506,12 @@ class DefaultExtension extends MProvider {
                     return await this.extractVideos(link.url, hostKey, quality.label, quality.numeric);
                 }
             }
-            return []; // Return empty array if host is not selected
+            return [];
         });
         
         const extractedVideos = await Promise.all(videoPromises);
         videos.push(...extractedVideos.flat());
 
-        // --- Step 3: Sort the final list ---
         const preferredQuality = this.getPreference("preferred_quality") || "1080";
         videos.sort((a, b) => {
             const aIsPreferred = a.quality.includes(preferredQuality);
@@ -397,35 +526,47 @@ class DefaultExtension extends MProvider {
         return videos;
     }
 
-    // --- FILTERS AND PREFERENCES ---
     getFilterList() {
         return [{
-            type_name: "HeaderFilter",
-            name: "هذا القسم يعمل لو كان البحث فارغاً"
-        }, {
             type_name: "SelectFilter",
-            name: "اقسام الموقع",
+            name: "القسم",
             state: 0,
             values: [
-                { name: "اختر", value: "none" },
-                // Movies from HTML
-                { name: "افلام اجنبية", value: "aflam-online-1" },
-                { name: "افلام نتفليكس", value: "netflix-movies-1" },
-                { name: "افلام اسيوية", value: "asian-aflam" },
-                { name: "افلام هندية", value: "indian-movies" },
-                { name: "افلام كرتون", value: "cartoon-movies" },
-                { name: "افلام انمي", value: "anime-movies" },
-                // Series from HTML
-                { name: "مسلسلات اجنبية", value: "english-series-1" },
-                { name: "مسلسلات نتفليكس", value: "netflix-series" },
-                { name: "مسلسلات اسيوية", value: "asian-series" },
-                { name: "مسلسلات انمي", value: "anime-series" },
-            ].map(v => ({...v, type_name: "SelectOption"}))
+                { name: "اختر القسم...", value: "none", type_name: "SelectOption" },
+                { name: "--- عام ---", value: "header", type_name: "HeaderFilter" },
+                { name: "الاكثر مشاهدة (Popular)", value: "popular", type_name: "SelectOption" },
+                { name: "المضاف حديثا (Latest All)", value: "latest", type_name: "SelectOption" },
+                { name: "--- تفصيل المضاف حديثا ---", value: "header", type_name: "HeaderFilter" },
+                { name: "اخر الافلام", value: "latest-movies", type_name: "SelectOption" },
+                { name: "اخر المسلسلات", value: "latest-series", type_name: "SelectOption" },
+                { name: "اخر الانمي", value: "latest-animes", type_name: "SelectOption" },
+                { name: "اخر حلقات المسلسلات", value: "latest-episodes", type_name: "SelectOption" },
+                { name: "اخر حلقات الانمي", value: "latest-anime-episodes", type_name: "SelectOption" },
+                { name: "--- قوائم الافلام ---", value: "header", type_name: "HeaderFilter" },
+                { name: "قائمة كل الافلام", value: "movies", type_name: "SelectOption" },
+                { name: "افلام اجنبية", value: "category/aflam-online-1", type_name: "SelectOption" },
+                { name: "افلام اجنبية عائلية", value: "category/aflam-online-1/aflam-family", type_name: "SelectOption" },
+                { name: "افلام نتفليكس", value: "category/netflix-movies-1", type_name: "SelectOption" },
+                { name: "افلام اسيوية", value: "category/asian-aflam", type_name: "SelectOption" },
+                { name: "افلام كرتون", value: "category/cartoon-movies", type_name: "SelectOption" },
+                { name: "افلام انمي", value: "category/anime-movies", type_name: "SelectOption" },
+                { name: "--- قوائم المسلسلات ---", value: "header", type_name: "HeaderFilter" },
+                { name: "قائمة كل المسلسلات", value: "series", type_name: "SelectOption" },
+                { name: "مسلسلات اجنبية", value: "category/english-series-1", type_name: "SelectOption" },
+                { name: "مسلسلات اجنبية عائلية", value: "category/english-series-1/english-family-series", type_name: "SelectOption" },
+                { name: "مسلسلات نتفليكس", value: "category/netflix-series", type_name: "SelectOption" },
+                { name: "مسلسلات اسيوية", value: "category/asian-series", type_name: "SelectOption" },
+                { name: "مسلسلات انمي", value: "category/anime-series", type_name: "SelectOption" },
+                { name: "انميات نتفليكس", value: "category/netflix-anime", type_name: "SelectOption" },
+                { name: "--- قوائم اخرى ---", value: "header", type_name: "HeaderFilter" },
+                { name: "قائمة المواسم", value: "seasons", type_name: "SelectOption" },
+                { name: "قائمة الحلقات", value: "episodes", type_name: "SelectOption" },
+            ]
         }, {
             type_name: "SeparatorFilter"
         }, {
             type_name: "HeaderFilter",
-            name: "الفلترة تعمل فقط لو كان قسم الموقع على 'اختر'"
+            name: "الفلترة بالنوع والتصنيف تعمل فقط لو كان القسم 'اختر'"
         }, {
             type_name: "SelectFilter",
             name: "النوع",
@@ -440,18 +581,14 @@ class DefaultExtension extends MProvider {
             name: "التصنيف",
             state: 0,
             values: [
-                // Existing Genres
                 "Action", "Adventure", "Animation", "Western", "Documentary", "Fantasy", 
                 "Science-fiction", "Romance", "Comedy", "Family", "Drama", "Thriller", 
-                "Crime", "Horror",
-                // Added Genres
-                "History", "Kids", "Music", "Mystery", "Reality", "Sci-Fi-Fantasy",
+                "Crime", "Horror", "History", "Kids", "Music", "Mystery", "Reality", "Sci-Fi-Fantasy",
                 "TV-Movie", "War", "thriller"
             ].sort().map(g => ({ type_name: "SelectOption", name: g, value: g }))
         }];
     }
     
-    // UPDATED getSourcePreferences to include the override
     getSourcePreferences() {
         return [{
             key: "override_base_url",
