@@ -161,6 +161,46 @@ class DefaultExtension extends MProvider {
 
     // --- VIDEO EXTRACTION ---
 
+    async uupbomExtractor(url, hostKey) {
+        const qualityLabel = `${hostKey} - Auto`;
+
+        try {
+            const headers = this.getHeaders(url);
+            const initialRes = await this.client.get(url, headers);
+            const doc = new Document(initialRes.body);
+
+            const inputs = doc.select('form[name="F1"] input[type="hidden"]');
+            if (inputs.length > 0) {
+                const formData = {};
+                inputs.forEach(i => { formData[i.attr("name")] = i.attr("value"); });
+                formData['method_free'] = 'Free Download >>';
+
+                const postRes = await this.client.post(url, headers, formData);
+                const match = postRes.body.match(/direct_link[^>]+>\s*<a\s*href="([^"]+)"/i);
+                
+                if (match && match[1]) {
+                    const videoUrl = match[1].replace(/\s/g, '%20').trim();
+                    return [{ url: videoUrl, originalUrl: url, quality: qualityLabel, headers: this.getHeaders(url) }];
+                }
+            }
+
+            const id = url.split('/').filter(Boolean).pop() || '';
+            const formData2 = { op: 'download2', id: id, rand: '', referer: url };
+            const postRes2 = await this.client.post(url, headers, formData2);
+            
+            const match2 = postRes2.body.match(/direct_link[^>]+>\s*<a\s*href="([^"]+)"/i);
+            if (match2 && match2[1]) {
+                const videoUrl = match2[1].replace(/\s/g, '%20').trim();
+                return [{ url: videoUrl, originalUrl: url, quality: qualityLabel, headers: this.getHeaders(url) }];
+            }
+
+            throw new Error("All uupbom extraction methods failed.");
+        } catch (e) {
+            console.error(`[uupbomExtractor Error] for URL: ${url}`, e.message);
+            return [];
+        }
+    }
+
     async mp4uploadExtractor(url, quality) {
         const embedUrl = url.startsWith("//") ? "https:" + url : url;
         const embedHtml = (await this.client.get(embedUrl, this.getHeaders(embedUrl))).body;
@@ -182,7 +222,7 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
         const doc = new Document(res.body);
         let videos = [];
-        const hosterSelection = this.getPreference("hoster_selection") || ["Dood", "Voe", "Mp4upload", "Okru"];
+        const hosterSelection = this.getPreference("hoster_selection") || ["Dood", "Voe", "Mp4upload", "Okru", "uupbom"];
         const headers = this.getHeaders(this.getBaseUrl() + url);
 
         const linkElements = doc.select('#episode-servers li a');
@@ -199,6 +239,8 @@ class DefaultExtension extends MProvider {
 
                 if (serverName.includes("Mp4upload") && hosterSelection.includes("Mp4upload")) {
                     videos.push(...(await this.mp4uploadExtractor(streamUrl, finalQualityString)));
+                } else if (serverName.toLowerCase().includes("uupbom") && hosterSelection.includes("uupbom")) {
+                    videos.push(...(await this.uupbomExtractor(streamUrl, serverName)));
                 } else if (serverName.includes("Dood") && hosterSelection.includes("Dood")) {
                     videos.push({ url: streamUrl, quality: finalQualityString, headers });
                 } else if (serverName.includes("Ok.ru") && hosterSelection.includes("Okru")) {
@@ -313,9 +355,9 @@ class DefaultExtension extends MProvider {
             multiSelectListPreference: {
                 title: "اختر السيرفرات",
                 summary: "اختر السيرفرات التي تريد ان تظهر",
-                entries: ["Dood", "Voe", "Mp4upload", "Okru"],
-                entryValues: ["Dood", "Voe", "Mp4upload", "Okru"],
-                values: ["Dood", "Voe", "Mp4upload", "Okru"],
+                entries: ["Dood", "Voe", "Mp4upload", "Okru", "uupbom"],
+                entryValues: ["Dood", "Voe", "Mp4upload", "Okru", "uupbom"],
+                values: ["Dood", "Voe", "Mp4upload", "Okru", "uupbom"],
             }
         }];
     }
