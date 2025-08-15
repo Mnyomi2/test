@@ -3,7 +3,7 @@ const mangayomiSources = [{
     "id": 5798993892749847,
     "lang": "ar",
     "baseUrl": "https://cimalek.art",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cimalek.art",
+    "iconUrl": "https://raw.githubusercontent.com/Mnyomi2/Mnyomi2/refs/heads/main/Mnyomi2/icon/cimalek.png",
     "typeSource": "single",
     "itemType": 1,
     "version": "1.4.1",
