@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "apiUrl": "https://ytstv.me/wp-admin/admin-ajax.php",
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://ytstv.me",
     "typeSource": "single",
-    "itemType": 1, // 1 for Anime/Video
+    "itemType": 1,
     "version": "1.0.0",
     "pkgPath": "anime/src/en/yts.js"
 }];
