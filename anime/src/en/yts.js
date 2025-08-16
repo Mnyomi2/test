@@ -1,13 +1,12 @@
-// --- METADATA ---
 const mangayomiSources = [{
     "name": "YTS",
     "id": 6218732994783510,
     "lang": "en",
     "baseUrl": "https://ytstv.me",
-    "apiUrl": "https://ytstv.me/wp-admin/admin-ajax.php",
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://ytstv.me",
     "typeSource": "single",
     "itemType": 1,
+    "isNsfw": true,
     "version": "1.0.0",
     "pkgPath": "anime/src/en/yts.js"
 }];
