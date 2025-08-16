@@ -174,5 +174,27 @@
         "additionalParams": "",
         "sourceCodeLanguage": 1,
         "notes": ""
+    },
+    {
+        "name": "YTS",
+        "id": 6218732994783510,
+        "baseUrl": "https://ytstv.me",
+        "lang": "en",
+        "typeSource": "single",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://ytstv.me",
+        "dateFormat": "",
+        "dateFormatLocale": "",
+        "isNsfw": true,
+        "hasCloudflare": false,
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/en/yts.js",
+        "apiUrl": "",
+        "version": "1.0.0",
+        "isManga": false,
+        "itemType": 1,
+        "isFullData": false,
+        "appMinVerReq": "0.5.0",
+        "additionalParams": "",
+        "sourceCodeLanguage": 1,
+        "notes": ""
     }
 ]
