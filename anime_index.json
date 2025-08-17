@@ -269,7 +269,7 @@
         "baseUrl": "https://yts.mx",
         "lang": "en",
         "typeSource": "single",
-        "iconUrl": "https://yts.mx/assets/images/website/favicon.ico",
+        "iconUrl": "https://raw.githubusercontent.com/Mnyomi2/Mnyomi2/main/Mnyomi2/icon/yts.jpg",
         "dateFormat": "",
         "dateFormatLocale": "",
         "isNsfw": false,
