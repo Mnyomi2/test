@@ -1,231 +1,242 @@
 const mangayomiSources = [{
     "name": "YTS",
-    "id": 6218732994783510,
+    "id": 891234567,
     "lang": "en",
-    "baseUrl": "https://ytstv.me",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://ytstv.me",
+    "baseUrl": "https://yts.mx",
+    "iconUrl": "https://yts.mx/assets/images/website/favicon.ico",
     "typeSource": "single",
     "itemType": 1,
-    "isNsfw": true,
     "version": "1.0.0",
     "pkgPath": "anime/src/en/yts.js"
 }];
 
-// --- CLASS ---
 class DefaultExtension extends MProvider {
-    // The constructor is called when the class is initialized.
     constructor() {
-        super(); // Always call the parent constructor.
-        this.client = new Client(); // Initialize the HTTP client.
+        super();
+        this.client = new Client();
+        this.apiBaseUrl = "https://yts.mx/api/v2";
     }
 
-    // --- PREFERENCES AND HEADERS ---
-
-    /**
-     * A helper function to get the base URL.
-     * @returns {string} The base URL.
-     */
-    getBaseUrl() {
-        return this.source.baseUrl;
+    getPreference(key) {
+        return new SharedPreferences().get(key);
     }
 
-    /**
-     * A helper function to create headers for HTTP requests.
-     * @param {string} url The URL for which the headers are being created.
-     * @returns {Object} A dictionary of headers.
-     */
-    getHeaders(url) {
-        return {
-            "Referer": this.getBaseUrl(),
-            "Origin": this.getBaseUrl(),
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-        };
-    }
-
-    // --- CUSTOM HELPERS ---
-
-    /**
-     * Parses the movie list from a given document.
-     * @param {Document} doc The document to parse.
-     * @returns {Object} An object with a list of movies and a boolean indicating if there's a next page.
-     */
-    parseMovieList(doc) {
-        const list = [];
-        const items = doc.select("div.browse-movie-wrap");
-        for (const item of items) {
-            const titleElement = item.selectFirst("a.browse-movie-title");
-            if (!titleElement) continue;
-
-            const name = titleElement.text;
-            const link = titleElement.getHref;
-            const imageUrl = item.selectFirst("img.img-responsive").getSrc;
-            list.push({ name, imageUrl, link });
+    _parseMovieList(resBody) {
+        const data = JSON.parse(resBody).data;
+        if (!data || !data.movies) {
+            return { list: [], hasNextPage: false };
         }
-        const hasNextPage = doc.selectFirst("li a:contains(Next »)") != null;
+
+        const list = data.movies.map(movie => ({
+            name: movie.title_long,
+            link: `${this.source.baseUrl}/movies/id/${movie.id}`,
+            imageUrl: movie.large_cover_image
+        }));
+
+        const hasNextPage = (data.movie_count || 0) > ((data.page_number || 1) * (data.limit || 20));
         return { list, hasNextPage };
     }
 
-    // --- CORE METHODS ---
-
-    /**
-     * Fetches the popular movies from the source.
-     * @param {number} page The page number to fetch.
-     * @returns {Object} An object with a list of movies and a boolean indicating if there's a next page.
-     */
     async getPopular(page) {
-        const url = `${this.getBaseUrl()}/browse-movies/0/all/all/0/featured/0/all?page=${page}`;
-        const res = await this.client.get(url, this.getHeaders(url));
-        const doc = new Document(res.body);
-        return this.parseMovieList(doc);
+        const sortBy = this.getPreference("yts_popular_sort") || "like_count";
+        const minRating = this.getPreference("yts_min_rating") || "0";
+        const url = `${this.apiBaseUrl}/list_movies.json?page=${page}&sort_by=${sortBy}&limit=20&minimum_rating=${minRating}`;
+        const res = await this.client.get(url);
+        return this._parseMovieList(res.body);
     }
 
-    /**
-     * Fetches the latest updates from the source.
-     * @param {number} page The page number to fetch.
-     * @returns {Object} An object with a list of movies and a boolean indicating if there's a next page.
-     */
     async getLatestUpdates(page) {
-        const url = `${this.getBaseUrl()}/browse-movies?page=${page}`;
-        const res = await this.client.get(url, this.getHeaders(url));
-        const doc = new Document(res.body);
-        return this.parseMovieList(doc);
+        const sortBy = this.getPreference("yts_latest_sort") || "date_added";
+        const minRating = this.getPreference("yts_min_rating") || "0";
+        const url = `${this.apiBaseUrl}/list_movies.json?page=${page}&sort_by=${sortBy}&limit=20&minimum_rating=${minRating}`;
+        const res = await this.client.get(url);
+        return this._parseMovieList(res.body);
     }
 
-    /**
-     * Searches for movies on the source.
-     * @param {string} query The search query.
-     * @param {number} page The page number to fetch.
-     * @param {Array} filters A list of filters selected by the user.
-     * @returns {Object} An object with a list of movies and a boolean indicating if there's a next page.
-     */
     async search(query, page, filters) {
-        let quality = "all";
-        let genre = "all";
-        let rating = "0";
-        let sortBy = "date_added";
-        let orderBy = "desc";
+        let url = `${this.apiBaseUrl}/list_movies.json?page=${page}&limit=20`;
 
-        for (const filter of filters) {
-            if (filter.type_name === "SelectFilter") {
-                const state = filter.values[filter.state];
-                if (filter.name === "Quality") quality = state.value;
-                if (filter.name === "Genre") genre = state.value;
-                if (filter.name === "Rating") rating = state.value;
-                if (filter.name === "Sort By") sortBy = state.value;
-                if (filter.name === "Order By") orderBy = state.value;
+        if (query) {
+            url += `&query_term=${encodeURIComponent(query)}`;
+        }
+
+        const genreFilter = filters.find(f => f.name === "Genre");
+        if (genreFilter && genreFilter.state > 0) {
+            url += `&genre=${genreFilter.values[genreFilter.state].value}`;
+        }
+
+        const qualityFilter = filters.find(f => f.name === "Quality");
+        if (qualityFilter && qualityFilter.state > 0) {
+            url += `&quality=${qualityFilter.values[qualityFilter.state].value}`;
+        }
+        
+        const ratingFilter = filters.find(f => f.name === "Minimum Rating");
+        if (ratingFilter && ratingFilter.state > 0) {
+            url += `&minimum_rating=${ratingFilter.values[ratingFilter.state].value}`;
+        }
+
+        const sortFilter = filters.find(f => f.type_name === "SortFilter");
+        if (sortFilter) {
+            const sort = sortFilter.values[sortFilter.state.index];
+            const sortBy = sort.value;
+            const orderBy = sortFilter.state.ascending ? 'asc' : 'desc';
+            url += `&sort_by=${sortBy}&order_by=${orderBy}`;
+        }
+
+        const res = await this.client.get(url);
+        return this._parseMovieList(res.body);
+    }
+
+    async getDetail(url) {
+        const movieId = url.split("/id/").pop();
+        const apiUrl = `${this.apiBaseUrl}/movie_details.json?movie_id=${movieId}&with_images=true&with_cast=true`;
+        const res = await this.client.get(apiUrl);
+        const movie = JSON.parse(res.body).data.movie;
+
+        let description = `${movie.description_full}\n\n`;
+        description += `Year: ${movie.year}\n`;
+        description += `Rating: ${movie.rating} / 10\n`;
+        description += `Runtime: ${movie.runtime} minutes\n`;
+        description += `Genres: ${movie.genres.join(", ")}\n`;
+        if (movie.cast && movie.cast.length > 0) {
+            description += `Cast: ${movie.cast.map(c => c.name).join(", ")}\n`;
+        }
+        
+        return {
+            name: movie.title_long,
+            imageUrl: movie.large_cover_image,
+            description: description.trim(),
+            link: url,
+            chapters: [{
+                name: "Stream / Download",
+                url: url
+            }],
+            status: 0
+        };
+    }
+
+    async getVideoList(url) {
+        const movieId = url.split("/id/").pop();
+        const apiUrl = `${this.apiBaseUrl}/movie_details.json?movie_id=${movieId}`;
+        const res = await this.client.get(apiUrl);
+        const movie = JSON.parse(res.body).data.movie;
+        
+        if (!movie || !movie.torrents) {
+            throw new Error("No torrents found for this movie.");
+        }
+
+        const linkType = this.getPreference("yts_link_type") || "magnet";
+        const videoList = [];
+
+        const trackers = [
+            "udp://open.demonii.com:1337/announce", "udp://tracker.openbittrent.com:80",
+            "udp://tracker.coppersurfer.tk:6969", "udp://glotorrents.pw:6969/announce",
+            "udp://tracker.opentrackr.org:1337/announce", "udp://torrent.gresille.org:80/announce",
+            "udp://p4p.arenabg.com:1337", "udp://tracker.leechers-paradise.org:6969"
+        ];
+        const encodedTrackers = trackers.map(tr => `tr=${encodeURIComponent(tr)}`).join("&");
+        const encodedTitle = encodeURIComponent(movie.title_long);
+
+        for (const torrent of movie.torrents) {
+            const qualityLabel = `${torrent.quality} (${torrent.type}) | ${torrent.size} | S:${torrent.seeds}/P:${torrent.peers}`;
+            
+            if (linkType === 'magnet' || linkType === 'both') {
+                const magnetUrl = `magnet:?xt=urn:btih:${torrent.hash}&dn=${encodedTitle}&${encodedTrackers}`;
+                videoList.push({
+                    url: magnetUrl,
+                    originalUrl: magnetUrl,
+                    quality: `[Magnet] ${qualityLabel}`,
+                });
+            }
+
+            if (linkType === 'torrent' || linkType === 'both') {
+                videoList.push({
+                    url: torrent.url,
+                    originalUrl: torrent.url,
+                    quality: `[.torrent] ${qualityLabel}`,
+                });
             }
         }
 
-        const url = `${this.getBaseUrl()}/browse-movies?query_term=${encodeURIComponent(query)}&quality=${quality}&genre=${genre}&minimum_rating=${rating}&sort_by=${sortBy}&order_by=${orderBy}&page=${page}`;
-        const res = await this.client.get(url, this.getHeaders(url));
-        const doc = new Document(res.body);
-        return this.parseMovieList(doc);
+        return videoList.sort((a, b) => b.quality.localeCompare(a.quality));
     }
 
-    /**
-     * Fetches the details for a specific movie.
-     * @param {string} url The URL of the movie.
-     * @returns {Object} A MediaDetail object.
-     */
-    async getDetail(url) {
-        const res = await this.client.get(url, this.getHeaders(url));
-        const doc = new Document(res.body);
-
-        const name = doc.selectFirst("div#movie-info h1").text;
-        const imageUrl = doc.selectFirst("div#movie-poster img").getSrc;
-        const description = doc.select("div#movie-synopsis p").map(p => p.text).join("\n\n");
-        const genreElements = doc.select("div#movie-info h2");
-        const genre = genreElements.length > 1 ? genreElements.at(1).text.split(" / ").map(g => g.trim()) : [];
-        const status = 1; // Completed
-
-        const chapters = [];
-        const year = doc.selectFirst("div#movie-info h2").text;
-        const dateUpload = new Date(year).valueOf().toString();
-        const torrentElements = doc.select("p.torrent-download a[href*='/torrent/download/']");
-        
-        for (const element of torrentElements) {
-            const epName = element.text.trim();
-            const epUrl = element.getHref;
-            chapters.push({ name: epName, url: epUrl, dateUpload });
-        }
-
-        return { name, imageUrl, description, link: url, status, genre, chapters };
-    }
-
-    /**
-     * Fetches the list of video streams for a specific episode (torrent).
-     * @param {string} url The URL of the torrent file.
-     * @returns {Array} A list of Video objects.
-     */
-    async getVideoList(url) {
-        // YTS provides torrent files, not direct video streams.
-        // The app's video player cannot play torrents directly.
-        // This method returns the torrent URL, which will allow users to
-        // download the file using an external app, but it will not stream.
-        return [{
-            url: url,
-            originalUrl: url,
-            quality: "Torrent",
-            headers: this.getHeaders(url)
-        }];
-    }
-
-    // --- FILTERS ---
-
-    /**
-     * Defines the available filters for the source.
-     * @returns {Array} A list of Filter objects.
-     */
     getFilterList() {
-        return [{
-            type_name: "HeaderFilter",
-            name: "Search Filters",
-        }, {
-            type_name: "SelectFilter",
-            name: "Quality",
-            state: 0,
-            values: [
-                { type_name: "SelectOption", name: "All", value: "all" },
-                { type_name: "SelectOption", name: "480p", value: "480p" },
-                { type_name: "SelectOption", name: "720p", value: "720p" },
-                { type_name: "SelectOption", name: "1080p", value: "1080p" },
-                { type_name: "SelectOption", name: "1080p.x265", value: "1080p-x265" },
-                { type_name: "SelectOption", name: "2160p", value: "2160p" },
-                { type_name: "SelectOption", name: "3D", value: "3D" }
-            ]
-        }, {
-            type_name: "SelectFilter",
-            name: "Genre",
-            state: 0,
-            values: [
-                { type_name: "SelectOption", name: "All", value: "all" }, { type_name: "SelectOption", name: "Action", value: "action" }, { type_name: "SelectOption", name: "Adventure", value: "adventure" }, { type_name: "SelectOption", name: "Animation", value: "animation" }, { type_name: "SelectOption", name: "Biography", value: "biography" }, { type_name: "SelectOption", name: "Comedy", value: "comedy" }, { type_name: "SelectOption", name: "Crime", value: "crime" }, { type_name: "SelectOption", name: "Documentary", value: "documentary" }, { type_name: "SelectOption", name: "Drama", value: "drama" }, { type_name: "SelectOption", name: "Family", value: "family" }, { type_name: "SelectOption", name: "Fantasy", value: "fantasy" }, { type_name: "SelectOption", name: "Film-Noir", value: "film-noir" }, { type_name: "SelectOption", name: "Game-Show", value: "game-show" }, { type_name: "SelectOption", name: "History", value: "history" }, { type_name: "SelectOption", name: "Horror", value: "horror" }, { type_name: "SelectOption", name: "Music", value: "music" }, { type_name: "SelectOption", name: "Musical", value: "musical" }, { type_name: "SelectOption", name: "Mystery", value: "mystery" }, { type_name: "SelectOption", name: "News", value: "news" }, { type_name: "SelectOption", name: "Reality-TV", value: "reality-tv" }, { type_name: "SelectOption", name: "Romance", value: "romance" }, { type_name: "SelectOption", name: "Sci-Fi", value: "sci-fi" }, { type_name: "SelectOption", name: "Sport", value: "sport" }, { type_name: "SelectOption", name: "Talk-Show", value: "talk-show" }, { type_name: "SelectOption", name: "Thriller", value: "thriller" }, { type_name: "SelectOption", name: "War", value: "war" }, { type_name: "SelectOption", name: "Western", value: "western" }
-            ]
-        }, {
-            type_name: "SelectFilter",
-            name: "Rating",
-            state: 0,
-            values: [
-                { type_name: "SelectOption", name: "All", value: "0" }, { type_name: "SelectOption", name: "9+", value: "9" }, { type_name: "SelectOption", name: "8+", value: "8" }, { type_name: "SelectOption", name: "7+", value: "7" }, { type_name: "SelectOption", name: "6+", value: "6" }, { type_name: "SelectOption", name: "5+", value: "5" }, { type_name: "SelectOption", name: "4+", value: "4" }, { type_name: "SelectOption", name: "3+", value: "3" }, { type_name: "SelectOption", name: "2+", value: "2" }, { type_name: "SelectOption", name: "1+", value: "1" }
-            ]
-        }, {
-            type_name: "SelectFilter",
-            name: "Sort By",
-            state: 6, // Default to Latest
-            values: [
-                { type_name: "SelectOption", name: "Title", value: "title" }, { type_name: "SelectOption", name: "Year", value: "year" }, { type_name: "SelectOption", name: "Rating", value: "rating" }, { type_name: "SelectOption", name: "Peers", value: "peers" }, { type_name: "SelectOption", name: "Seeds", value: "seeds" }, { type_name: "SelectOption", name: "Downloads", value: "download_count" }, { type_name: "SelectOption", name: "Latest", value: "date_added" }, { type_name: "SelectOption", name: "Likes", value: "like_count" }
-            ]
-        }, {
-            type_name: "SelectFilter",
-            name: "Order By",
-            state: 0, // Default to Descending
-            values: [
-                { type_name: "SelectOption", name: "Descending", value: "desc" },
-                { type_name: "SelectOption", name: "Ascending", value: "asc" }
-            ]
-        }];
+        const genres = [
+            "All", "Action", "Adventure", "Animation", "Biography", "Comedy", "Crime",
+            "Documentary", "Drama", "Family", "Fantasy", "Film-Noir", "Game-Show",
+            "History", "Horror", "Music", "Musical", "Mystery", "News", "Reality-TV",
+            "Romance", "Sci-Fi", "Sport", "Talk-Show", "Thriller", "War", "Western"
+        ];
+        
+        const qualities = ["All", "480p", "720p", "1080p", "2160p", "3D"];
+        const ratings = ["All", "9+", "8+", "7+", "6+", "5+", "4+", "3+", "2+", "1+"];
+        const ratingValues = ["0", "9", "8", "7", "6", "5", "4", "3", "2", "1"];
+
+        const sortOptions = [
+            { name: "Date Added", value: "date_added" }, { name: "Like Count", value: "like_count" },
+            { name: "Title", value: "title" }, { name: "Year", value: "year" },
+            { name: "Rating", value: "rating" }, { name: "Peers", value: "peers" },
+            { name: "Seeds", value: "seeds" }, { name: "Download Count", value: "download_count" }
+        ];
+        
+        return [
+            { type_name: "SelectFilter", name: "Genre", state: 0, values: genres.map(g => ({ type_name: "SelectOption", name: g, value: g.toLowerCase() === 'all' ? '' : g })) },
+            { type_name: "SelectFilter", name: "Quality", state: 0, values: qualities.map(q => ({ type_name: "SelectOption", name: q, value: q.toLowerCase() === 'all' ? '' : q })) },
+            { type_name: "SelectFilter", name: "Minimum Rating", state: 0, values: ratings.map((r, i) => ({ type_name: "SelectOption", name: r, value: ratingValues[i] })) },
+            { type_name: "SortFilter", name: "Sort By", state: { index: 0, ascending: false }, values: sortOptions.map(s => ({ type_name: "SelectOption", name: s.name, value: s.value })) }
+        ];
     }
-}
+    
     getSourcePreferences() {
-        return [];
+        const sortEntries = ["Popularity (Likes)", "Date Added", "Rating", "Peer Count", "Title", "Year"];
+        const sortValues = ["like_count", "date_added", "rating", "peers", "title", "year"];
+        
+        // UPDATED: Expanded rating options to include all values from 0-9
+        const ratingEntries = ["Any", "9+", "8+", "7+", "6+", "5+", "4+", "3+", "2+", "1+"];
+        const ratingValues = ["0", "9", "8", "7", "6", "5", "4", "3", "2", "1"];
+
+        return [
+            {
+                key: "yts_link_type",
+                listPreference: {
+                    title: "Video Link Type",
+                    summary: "Choose which type of links to show for streaming/downloading.",
+                    valueIndex: 0,
+                    entries: ["Magnet Links Only", ".torrent File Links Only", "Show Both"],
+                    entryValues: ["magnet", "torrent", "both"]
+                }
+            },
+            {
+                key: "yts_popular_sort",
+                listPreference: {
+                    title: "Default 'Popular' Sort",
+                    summary: "Set the default sort order for the 'Popular' tab.",
+                    valueIndex: 0,
+                    entries: sortEntries,
+                    entryValues: sortValues
+                }
+            },
+            {
+                key: "yts_latest_sort",
+                listPreference: {
+                    title: "Default 'Latest' Sort",
+                    summary: "Set the default sort order for the 'Latest' tab.",
+                    valueIndex: 1,
+                    entries: sortEntries,
+                    entryValues: sortValues
+                }
+            },
+            {
+                key: "yts_min_rating",
+                listPreference: {
+                    title: "Default Minimum Rating",
+                    summary: "Filter 'Popular' and 'Latest' tabs by a minimum IMDb rating.",
+                    valueIndex: 0,
+                    entries: ratingEntries,
+                    entryValues: ratingValues
+                }
+            }
+        ];
     }
 }
