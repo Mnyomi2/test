@@ -1,5 +1,27 @@
 [
     {
+        "name": "AnimeOnsen",
+        "id": 6902788326284542000,
+        "baseUrl": "https://animeonsen.xyz",
+        "lang": "all",
+        "typeSource": "single",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://animeonsen.xyz",
+        "dateFormat": "",
+        "dateFormatLocale": "",
+        "isNsfw": false,
+        "hasCloudflare": false,
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/all/animeonsen.js",
+        "apiUrl": "https://api.animeonsen.xyz/v4",
+        "version": "1.0.0",
+        "isManga": false,
+        "itemType": 1,
+        "isFullData": false,
+        "appMinVerReq": "0.5.0",
+        "additionalParams": "",
+        "sourceCodeLanguage": 1,
+        "notes": ""
+    },
+    {
         "name": "RouVideo (肉視頻)",
         "id": 543219876,
         "baseUrl": "https://rou.video",
