@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://animeonsen.xyz",
     "typeSource": "single",
     "itemType": 1,
-    "version": "1.0.0",
+    "version": "1.3.3",
     "pkgPath": "anime/src/all/animeonsen.js"
 }];
 
@@ -16,8 +16,14 @@ class DefaultExtension extends MProvider {
         super();
         this.client = new Client();
         this.apiUrl = "https://api.animeonsen.xyz/v4";
-        this.AO_API_KEY = "3246734277686144";
-        this.AO_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.4044.138 Safari/537.36";
+        this.AO_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+        
+        // This static token might expire. If the source stops working, it may need to be updated.
+        this.STATIC_BEARER_TOKEN = "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImRlZmF1bHQifQ.eyJpc3MiOiJodHRwczovL2F1dGguYW5pbWVvbnNlbi54eXovIiwiYXVkIjoiaHR0cHM6Ly9hcGkuYW5pbWVvbnNlbi54eXoiLCJpYXQiOjE3NTU0NTgzOTIsImV4cCI6MTc1NjA2MzE5Miwic3ViIjoiMDZkMjJiOTYtNjNlNy00NmE5LTgwZmMtZGM0NDFkNDFjMDM4LmNsaWVudCIsImF6cCI6IjA2ZDIyYjk2LTYzZTctNDZhOS04MGZjLWRjNDQxZDQxYzAzOCIsImd0eSI6ImNsaWVudF9jcmVkZW50aWFscyJ9.mjnUcC4AWhmIcdLsAjOEs4_BnvaYwGevp3uGN-BNrWnFlWW3csvchnYfIZYSM2WsUG690EtI3URWBLtOVCrGlRNHlRv50Jhc_-il2phCOOyZCIjqUWVU0hD9myIF-KycJo_UD9ETi3agXw7AlR_BeOmMmtug2_jpCcAUuFAGbvCsOo32DJVs2eAhVw27tudLvq-UBtA6OLY9jpSKmkgEr8LTcJY7gZ2s5Zr0pAGNicseOGwSpb1aWJ1bMpVCkbmYH1OEYrgN1P9BvaZq5ct9vaDIAqw7P5Dqh4wD_ObAJ5Dt-pL84GXI-W6mHyOZMgaqNt46OyCxK8Ue2n5RgQdHBw";
+    }
+
+    get supportsLatest() {
+        return false;
     }
 
     getPreference(key) {
@@ -25,24 +31,31 @@ class DefaultExtension extends MProvider {
     }
 
     getBaseUrl() {
-        return this.source.baseUrl;
+        return this.getPreference("override_base_url") || this.source.baseUrl;
     }
 
     getHeaders(url) {
         const headers = {
             "User-Agent": this.AO_USER_AGENT,
             "Referer": this.getBaseUrl(),
+            "Origin": this.getBaseUrl(),
+            "Accept": "application/json, text/plain, */*",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
         };
-        if (url.includes(this.apiUrl)) {
-            headers["apikey"] = this.AO_API_KEY;
+
+        if (url.includes(this.apiUrl) && !url.includes("/image/")) {
+            headers["Authorization"] = this.STATIC_BEARER_TOKEN;
         }
         return headers;
     }
 
-    // --- CORE METHODS ---
-
     async getPopular(page) {
-        const url = `${this.apiUrl}/content/index?start=${(page - 1) * 20}&limit=20`;
+        const limit = 30;
+        const start = (page - 1) * limit;
+        const url = `${this.apiUrl}/content/index?start=${start}&limit=${limit}`;
+
         const res = await this.client.get(url, this.getHeaders(url));
         const data = JSON.parse(res.body);
 
@@ -57,15 +70,15 @@ class DefaultExtension extends MProvider {
     }
 
     async getLatestUpdates(page) {
-        throw new Error("Not supported");
+        throw new Error("This source does not support latest updates.");
     }
 
     async search(query, page, filters) {
-        // Search is not paginated by the source
         if (page > 1) {
             return { list: [], hasNextPage: false };
         }
-        const url = `${this.apiUrl}/search/${query}`;
+        const encodedQuery = encodeURIComponent(query);
+        const url = `${this.apiUrl}/search/${encodedQuery}`;
         const res = await this.client.get(url, this.getHeaders(url));
         const data = JSON.parse(res.body);
 
@@ -80,8 +93,6 @@ class DefaultExtension extends MProvider {
 
     async getDetail(url) {
         const detailUrl = `${this.apiUrl}/content/${url}/extensive`;
-        const episodesUrl = `${this.apiUrl}/content/${url}/episodes`;
-
         const detailRes = await this.client.get(detailUrl, this.getHeaders(detailUrl));
         const details = JSON.parse(detailRes.body);
 
@@ -93,23 +104,26 @@ class DefaultExtension extends MProvider {
         const genre = details.mal_data?.genres?.map(g => g.name) || [];
         
         const statusText = details.mal_data?.status?.trim();
-        let status = 5; // Unknown
+        let status;
         if (statusText === "finished_airing") {
-            status = 1; // Completed
+            status = 1;
         } else if (statusText === "currently_airing") {
-            status = 0; // Ongoing
+            status = 0;
+        } else {
+            status = 5;
         }
-
+        
+        const episodesUrl = `${this.apiUrl}/content/${url}/episodes`;
         const episodesRes = await this.client.get(episodesUrl, this.getHeaders(episodesUrl));
         const episodesData = JSON.parse(episodesRes.body);
 
-        const chapters = Object.entries(episodesData).map(([epNum, item]) => ({
-            name: `Episode ${epNum}: ${item.name}`,
+        let chapters = Object.entries(episodesData).map(([epNum, item]) => ({
+            name: `Episode ${epNum}: ${item.contentTitle_episode_en}`,
             url: `${url}/video/${epNum}`,
             episode: parseFloat(epNum)
         }));
 
-        chapters.sort((a, b) => b.episode - a.episode);
+        chapters = chapters.sort((a, b) => b.episode - a.episode);
 
         return { name, imageUrl, description, link, status, genre, author, chapters };
     }
@@ -127,24 +141,53 @@ class DefaultExtension extends MProvider {
             label: subtitleLangs[langPrefix] || langPrefix,
             langPrefix: langPrefix
         }));
-
-        // Sort subtitles based on preference
-        const preferredLang = this.getPreference("preferred_sub_lang") || "en-US";
-        subtitles = subtitles.sort((a, b) => {
-            if (a.langPrefix === preferredLang) return -1;
-            if (b.langPrefix === preferredLang) return 1;
-            return 0;
+        
+        // Simplified sorting: Prioritize English ('en-US') if it exists.
+        subtitles.sort((a, b) => {
+            if (a.langPrefix === 'en-US' && b.langPrefix !== 'en-US') return -1;
+            if (b.langPrefix === 'en-US' && a.langPrefix !== 'en-US') return 1;
+            return 0; // Keep original order for other languages
         });
 
-        const video = {
+        const defaultVideo = {
             url: streamUrl,
             originalUrl: streamUrl,
-            quality: "Default (720p)",
+            quality: "Default (DASH)",
             headers: this.getHeaders(streamUrl),
             subtitles: subtitles
         };
-        
-        return [video];
+
+        if (!this.getPreference("extract_qualities")) {
+            return [defaultVideo];
+        }
+
+        const finalVideos = [];
+        try {
+            const manifestContent = (await this.client.get(streamUrl, this.getHeaders(streamUrl))).body;
+            const regex = /<Representation.*?height="(\d+)"/g;
+            let match;
+            const qualities = new Set();
+
+            while ((match = regex.exec(manifestContent)) !== null) {
+                qualities.add(parseInt(match[1]));
+            }
+
+            if (qualities.size > 0) {
+                finalVideos.push(defaultVideo);
+                const sortedQualities = [...qualities].sort((a, b) => b - a);
+                sortedQualities.forEach(height => {
+                    finalVideos.push({
+                        ...defaultVideo,
+                        quality: `${height}p`
+                    });
+                });
+                return finalVideos;
+            } else {
+                return [defaultVideo];
+            }
+        } catch (e) {
+            return [defaultVideo];
+        }
     }
     
     getFilterList() {
@@ -153,13 +196,20 @@ class DefaultExtension extends MProvider {
     
     getSourcePreferences() {
         return [{
-            key: "preferred_sub_lang",
-            listPreference: {
-                title: "Preferred subtitle language",
-                summary: "%s",
-                valueIndex: 0,
-                entries: ["English", "Spanish", "Portuguese", "French", "German", "Italian", "Russian", "Arabic"],
-                entryValues: ["en-US", "es-LA", "pt-BR", "fr-FR", "de-DE", "it-IT", "ru-RU", "ar-ME"],
+            key: "override_base_url",
+            editTextPreference: {
+                title: "Override Base URL",
+                summary: "Use a different mirror/domain for the source. Requires app restart.",
+                value: this.source.baseUrl,
+                dialogTitle: "Enter new Base URL",
+                dialogMessage: `Default: ${this.source.baseUrl}`,
+            }
+        }, {
+            key: "extract_qualities",
+            switchPreferenceCompat: {
+                title: "Enable Stream Quality Extraction",
+                summary: "If a stream provides multiple qualities, this will list them. (e.g. 1080p, 720p)",
+                value: true,
             }
         }];
     }
