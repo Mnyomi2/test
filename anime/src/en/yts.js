@@ -3,7 +3,7 @@ const mangayomiSources = [{
     "id": 891234567,
     "lang": "en",
     "baseUrl": "https://yts.mx",
-    "iconUrl": "https://yts.mx/assets/images/website/favicon.ico",
+    "iconUrl": "https://raw.githubusercontent.com/Mnyomi2/Mnyomi2/main/Mnyomi2/icon/yts.jpg",
     "typeSource": "single",
     "itemType": 1,
     "version": "1.0.0",
