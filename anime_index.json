@@ -132,6 +132,28 @@
         "notes": ""
     },
     {
+        "name": "EZTV",
+        "id": 987654321,
+        "baseUrl": "https://eztvx.to",
+        "lang": "en",
+        "typeSource": "single",
+        "iconUrl": "https://eztvx.to/favicon.ico",
+        "dateFormat": "",
+        "dateFormatLocale": "",
+        "isNsfw": false,
+        "hasCloudflare": false,
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/en/eztv.js",
+        "apiUrl": "",
+        "version": "1.0.0",
+        "isManga": false,
+        "itemType": 1,
+        "isFullData": false,
+        "appMinVerReq": "0.5.0",
+        "additionalParams": "",
+        "sourceCodeLanguage": 1,
+        "notes": ""
+    },
+    {
         "name": "HentaiMama",
         "id": 9876543210,
         "baseUrl": "https://hentaimama.io",
