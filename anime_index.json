@@ -12,7 +12,7 @@
         "hasCloudflare": false,
         "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/all/animeonsen.js",
         "apiUrl": "https://api.animeonsen.xyz/v4",
-        "version": "1.0.0",
+        "version": "1.3.3",
         "isManga": false,
         "itemType": 1,
         "isFullData": false,
