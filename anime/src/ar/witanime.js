@@ -1,15 +1,15 @@
+// --- METADATA ---
 const mangayomiSources = [{
     "name": "WitAnime",
-    "id": 984372845,
+    "id": 6018541085,
     "lang": "ar",
-    "baseUrl": "https://witanime.com",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://witanime.com",
-    "typeSource": "multi",
+    "baseUrl": "https://witanime.rest",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=witanime.rest",
+    "typeSource": "single",
     "itemType": 1,
-    "version": "2.0.2",
+    "version": "2.0.3",
     "pkgPath": "anime/src/ar/witanime.js"
 }];
-
 
 // --- CLASS ---
 class DefaultExtension extends MProvider {
