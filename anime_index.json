@@ -210,7 +210,7 @@
         "hasCloudflare": false,
         "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/witanime.js",
         "apiUrl": "",
-        "version": "2.0.2",
+        "version": "2.0.3",
         "isManga": false,
         "itemType": 1,
         "isFullData": false,
@@ -331,3 +331,4 @@
     }
 
 ]
+
