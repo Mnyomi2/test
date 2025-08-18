@@ -93,7 +93,7 @@
         "baseUrl": "https://animeiat.co",
         "lang": "ar",
         "typeSource": "single",
-        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://animeiat.co",
+        "iconUrl": "https://raw.githubusercontent.com/Mnyomi2/Mnyomi2/refs/heads/main/Mnyomi2/icon/animeiat.png",
         "dateFormat": "",
         "dateFormatLocale": "",
         "isNsfw": false,
