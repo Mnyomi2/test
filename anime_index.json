@@ -310,10 +310,10 @@
     {
         "name": "Tuktukcinema",
         "id": 843294759,
-        "baseUrl": "https://tuktukcinema.lat",
+        "baseUrl": "https://tuk.cam",
         "lang": "ar",
         "typeSource": "single",
-        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=tuktukcinema.lat",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://tuk.cam",
         "dateFormat": "",
         "dateFormatLocale": "",
         "isNsfw": false,
@@ -351,4 +351,5 @@
         "sourceCodeLanguage": 1,
         "notes": ""
     }
+
 ]
