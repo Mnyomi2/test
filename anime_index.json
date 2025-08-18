@@ -88,6 +88,28 @@
         "notes": ""
     },
     {
+        "name": "Animeiat",
+        "id": 1701240113941,
+        "baseUrl": "https://animeiat.co",
+        "lang": "ar",
+        "typeSource": "single",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://animeiat.co",
+        "dateFormat": "",
+        "dateFormatLocale": "",
+        "isNsfw": false,
+        "hasCloudflare": false,
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/animeiat.js",
+        "apiUrl": "https://api.animeiat.co/v1",
+        "version": "1.0.0",
+        "isManga": false,
+        "itemType": 1,
+        "isFullData": false,
+        "appMinVerReq": "0.5.0",
+        "additionalParams": "",
+        "sourceCodeLanguage": 1,
+        "notes": ""
+    },
+    {
         "name": "Animerco",
         "id": 645698215,
         "baseUrl": "https://vip.animerco.org",
