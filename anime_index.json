@@ -110,7 +110,7 @@
         "notes": ""
     },
     {
-        "name": "Animeiat TV",
+        "name": "AnimeiatTV",
         "id": 621985370,
         "baseUrl": "https://www.animeiat.tv",
         "lang": "ar",
@@ -329,4 +329,5 @@
         "sourceCodeLanguage": 1,
         "notes": ""
     }
+
 ]
