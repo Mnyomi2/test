@@ -1,6 +1,6 @@
 // --- METADATA ---
 const mangayomiSources = [{
-    "name": "Animeiat TV",
+    "name": "AnimeiatTV",
     "id": 621985370,
     "baseUrl": "https://www.animeiat.tv",
     "apiUrl": "https://api.animegarden.net",
