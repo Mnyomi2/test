@@ -4,7 +4,7 @@ const mangayomiSources = [{
     "baseUrl": "https://tuk.cam",
     "lang": "ar",
     "typeSource": "single",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=tuk.cam",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://tuk.cam",
     "itemType": 1,
     "version": "1.0.1",
     "pkgPath": "anime/src/ar/tuktukcinema.js",
