@@ -1,13 +1,13 @@
 const mangayomiSources = [{
-    "name": "Tuktukcinema",
+    "name": "Topcinema",
     "id": 645839201,
     "baseUrl": "https://web6.topcinema.cam",
     "lang": "ar",
     "typeSource": "single",
-    "iconUrl": "https://web6.topcinema.cam",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://web6.topcinema.cam",
     "itemType": 1,
     "version": "1.0.1",
-    "pkgPath": "anime/src/ar/tuktukcinema.js",
+    "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
 class DefaultExtension extends MProvider {
