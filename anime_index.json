@@ -198,6 +198,28 @@
         "notes": ""
     },
     {
+        "name": "Tuktukcinema",
+        "id": 645839201,
+        "baseUrl": "https://tuk.cam",
+        "lang": "ar",
+        "typeSource": "single",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=tuk.cam",
+        "dateFormat": "",
+        "dateFormatLocale": "",
+        "isNsfw": false,
+        "hasCloudflare": false,
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/tuktukcinema.js",
+        "apiUrl": "",
+        "version": "1.0.1",
+        "isManga": false,
+        "itemType": 1,
+        "isFullData": false,
+        "appMinVerReq": "0.5.0",
+        "additionalParams": "",
+        "sourceCodeLanguage": 1,
+        "notes": ""
+    },
+    {
         "name": "WitAnime",
         "id": 984372845,
         "baseUrl": "https://witanime.com",
@@ -310,17 +332,17 @@
     {
         "name": "Tuktukcinema",
         "id": 843294759,
-        "baseUrl": "https://tuk.cam",
+        "baseUrl": "https://tuktukcinema.lat",
         "lang": "ar",
         "typeSource": "single",
-        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://tuk.cam",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=tuktukcinema.lat",
         "dateFormat": "",
         "dateFormatLocale": "",
         "isNsfw": false,
         "hasCloudflare": false,
         "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/tuktukcinema.js",
         "apiUrl": "",
-        "version": "1.0.1",
+        "version": "1.0.0",
         "isManga": false,
         "itemType": 1,
         "isFullData": false,
@@ -351,5 +373,4 @@
         "sourceCodeLanguage": 1,
         "notes": ""
     }
-
 ]
