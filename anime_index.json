@@ -176,6 +176,28 @@
         "notes": ""
     },
     {
+        "name": "Movizland",
+        "id": 9934567890,
+        "baseUrl": "https://movizland.lol",
+        "lang": "ar",
+        "typeSource": "multi",
+        "iconUrl": "https://i.ibb.co/ZS8tq3z/movizl.png",
+        "dateFormat": "",
+        "dateFormatLocale": "",
+        "isNsfw": false,
+        "hasCloudflare": false,
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/movizland.js",
+        "apiUrl": "",
+        "version": "1.0.0",
+        "isManga": false,
+        "itemType": 1,
+        "isFullData": false,
+        "appMinVerReq": "0.5.0",
+        "additionalParams": "",
+        "sourceCodeLanguage": 1,
+        "notes": ""
+    },
+    {
         "name": "MY Cima",
         "id": 1039485720,
         "baseUrl": "https://wecima.show",
@@ -395,5 +417,4 @@
         "sourceCodeLanguage": 1,
         "notes": ""
     }
-
 ]
