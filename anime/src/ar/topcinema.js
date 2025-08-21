@@ -34,12 +34,14 @@ class DefaultExtension extends MProvider {
     }
 
     /**
-     * يقوم بتنظيف وتنسيق عناوين الأفلام والمسلسلات بناءً على قواعد محددة.
+     * وظيفة شاملة لتنظيف وتنسيق عناوين الأفلام والمسلسلات.
+     * تطبق سلسلة من القواعد لجعل العناوين موجزة ومتسقة.
      * @param {string} title العنوان الأصلي المراد معالجته.
      * @returns {string} العنوان بعد التنظيف والتنسيق.
      */
     _titleEdit(title) { 
-        let editedTitle = title;
+        let editedTitle = title ? title.trim() : ""; 
+        if (!editedTitle) return editedTitle;
 
         const arabicSeasonMap = {
             "الاول": "1", "الثاني": "2", "الثالث": "3", "الرابع": "4", "الخامس": "5",
@@ -47,89 +49,101 @@ class DefaultExtension extends MProvider {
             "الحادي عشر": "11", "الثاني عشر": "12", "الثالث عشر": "13", "الرابع عشر": "14", "الخامس عشر": "15"
         };
 
-        // 1. استخراج السنة (4 أرقام) من أي مكان في العنوان وحفظها لإضافتها لاحقًا في النهاية.
         let extractedYear = '';
         editedTitle = editedTitle.replace(/(\b\d{4}\b)/, (match, p1) => {
             extractedYear = p1; 
             return ''; 
         });
 
-        // 2. إزالة البادئات الشائعة في بداية العنوان (فيلم, عرض, مسلسل, برنامج, انمي).
-        // هذا السطر يزيل "مسلسل " إذا كانت في البداية.
         editedTitle = editedTitle.replace(/^(?:فيلم|عرض|مسلسل|برنامج|انمي)\s+/, '');
-
-        // 3. تحويل عبارة "والاخيرة" إلى "End".
         editedTitle = editedTitle.replace(/\s+والاخيرة\b/g, ' End'); 
 
-        // 4. معالجة الموسم: تحويل "الموسم X" إلى "sX".
-        // أ. تحويل أسماء المواسم العربية النصية إلى أرقام.
         for (const key in arabicSeasonMap) {
             const regex = new RegExp(`الموسم\\s*${key}\\b`, 'g'); 
             editedTitle = editedTitle.replace(regex, `الموسم ${arabicSeasonMap[key]}`);
         }
-        // ب. تحويل "الموسم رقم" إلى "sرقم".
         editedTitle = editedTitle.replace(/الموسم\s*(\d+)/g, 's$1');
 
-        // 5. معالجة "الحلقة XXXX" (برقم كبير، 3 أرقام أو أكثر) كـ 'موسم' ضمني "s XXXX".
         editedTitle = editedTitle.replace(/الحلقة\s*(\d{3,})/g, 's$1');
-
-        // 6. معالجة باقي الحلقات: تحويل "الحلقة Y" إلى "ep Y".
         editedTitle = editedTitle.replace(/الحلقة\s*(\d+)/g, 'ep $1');
 
-        // 7. إزالة اللواحق الشائعة في نهاية العنوان (مترجم, مترجمة, اون لاين).
-        // هذا السطر يزيل "مترجم" إذا كانت في النهاية.
         editedTitle = editedTitle.replace(/\s+(?:مترجم|مترجمة|اون لاين)\s*$/, '');
+        editedTitle = editedTitle.replace(/\s+/g, ' ');
 
-        // 8. تنظيف المسافات: استبدال المسافات المتعددة بمسافة واحدة وتقليم العنوان.
-        editedTitle = editedTitle.replace(/\s+/g, ' ').trim();
-
-        // 9. إضافة السنة المستخرجة إلى نهاية العنوان إذا وجدت.
         if (extractedYear) {
             editedTitle += ` ${extractedYear}`;
         }
 
-        // 10. تنظيف نهائي للمسافات.
         return editedTitle.trim();
     }
 
-    async getPopular(page) {
-        const doc = await this.requestDoc(`/movies/page/${page}/`); 
+    /**
+     * وظيفة مساعدة لجلب ومعالجة عناصر القائمة (الأفلام والمسلسلات).
+     * إذا كان العنصر مسلسلًا، فإنه يقوم بطلب صفحة تفاصيله لجلب مواسمه وعرضها كعناصر منفصلة.
+     * @param {Document} doc وثيقة HTML للصفحة الحالية.
+     * @returns {Promise<Array<any>>} مصفوفة بالعناصر المعالجة (أفلام أو مواسم مسلسلات).
+     */
+    async _processListingItems(doc) {
         const list = [];
         const items = doc.select("div.Block--Item, div.Small--Box");
         const imageAttr = "data-src"; 
 
-        items.forEach(item => {
+        for (const item of items) { 
             const linkElement = item.selectFirst("a");
-            if (!linkElement) return;
+            if (!linkElement) continue;
 
-            const name = this._titleEdit(linkElement.attr("title"));
-            const imageUrl = item.selectFirst("img")?.attr(imageAttr); 
             const link = linkElement.getHref;
+            // محاولة استخراج العنوان لعناصر القائمة الرئيسية
+            const rawTitle = linkElement.attr("title") || item.selectFirst("h3.title")?.text;
+            const name = this._titleEdit(rawTitle); 
+            const imageUrl = item.selectFirst("img")?.attr(imageAttr);
 
-            list.push({ name, imageUrl, link });
-        });
+            if (link.includes('/series/')) {
+                try {
+                    const seriesDetailPageDoc = await this.requestDoc(link.replace(this.source.baseUrl, ''));
+                    const seasonElements = seriesDetailPageDoc.select("section.allseasonss div.Small--Box.Season");
 
+                    if (seasonElements.length > 0) {
+                        for (const seasonItem of seasonElements) {
+                            const seasonLinkElement = seasonItem.selectFirst("a");
+                            if (!seasonLinkElement) continue;
+
+                            // ***** التعديل هنا: محاولة استخراج العنوان لعناصر المواسم *****
+                            // أولاً من 'title' لعنصر الرابط، ثم من نص 'h3.title' داخل عنصر الموسم إذا وجد
+                            const seasonRawTitle = seasonLinkElement.attr("title") || seasonItem.selectFirst("h3.title")?.text;
+                            const seasonName = this._titleEdit(seasonRawTitle);
+                            // **********************************************************
+
+                            const seasonImageUrl = seasonItem.selectFirst("img")?.attr(imageAttr); 
+                            const seasonLink = seasonLinkElement.getHref;
+
+                            list.push({ name: seasonName, imageUrl: seasonImageUrl, link: seasonLink });
+                        }
+                    } else {
+                        // في حال عدم العثور على مواسم (ندرة أو خطأ في الهيكل)، أضف العنصر الرئيسي للمسلسل كخيار احتياطي
+                        list.push({ name, imageUrl, link });
+                    }
+                } catch (error) {
+                    console.error(`Error processing series ${name} (${link}):`, error);
+                    list.push({ name, imageUrl, link });
+                }
+            } else {
+                list.push({ name, imageUrl, link });
+            }
+        }
+        return list;
+    }
+
+    async getPopular(page) {
+        const doc = await this.requestDoc(`/movies/page/${page}/`); 
+        const list = await this._processListingItems(doc); 
         const hasNextPage = !!doc.selectFirst("div.pagination ul.page-numbers li a.next");
         return { list, hasNextPage };
     }
 
     async getLatestUpdates(page) {
         const doc = await this.requestDoc(`/recent/page/${page}/`);
-        const list = [];
-        const items = doc.select("div.Block--Item, div.Small--Box");
-        const imageAttr = "data-src";
-
-        items.forEach(item => {
-            const linkElement = item.selectFirst("a");
-            if (!linkElement) return;
-
-            const name = this._titleEdit(linkElement.attr("title"));
-            const imageUrl = item.selectFirst("img")?.attr(imageAttr);
-            const link = linkElement.getHref;
-
-            list.push({ name, imageUrl, link });
-        });
-
+        const list = await this._processListingItems(doc); 
         const hasNextPage = !!doc.selectFirst("div.pagination ul.page-numbers li a.next");
         return { list, hasNextPage };
     }
@@ -137,8 +151,6 @@ class DefaultExtension extends MProvider {
     async search(query, page, filters) {
         let path;
         const categoryFilter = filters[0];   
-
-        const imageAttr = "data-src"; 
 
         if (query) {
             const offset = page - 1; 
@@ -164,21 +176,7 @@ class DefaultExtension extends MProvider {
         }
 
         const doc = await this.requestDoc(path); 
-        
-        const list = [];
-        const items = doc.select("div.Small--Box, div.Block--Item"); 
-
-        items.forEach(item => {
-            const linkElement = item.selectFirst("a");
-            if (!linkElement) return;
-
-            const name = this._titleEdit(linkElement.attr("title"));
-            const imageUrl = item.selectFirst("img")?.attr(imageAttr); 
-            const link = linkElement.getHref;
-
-            list.push({ name, imageUrl, link });
-        });
-
+        const list = await this._processListingItems(doc); 
         const hasNextPage = !!doc.selectFirst("div.pagination ul.page-numbers li a.next");
         return { list, hasNextPage };
     }
@@ -191,7 +189,7 @@ class DefaultExtension extends MProvider {
         const imageUrl = doc.selectFirst("div.left div.image img")?.getSrc;
         const description = doc.selectFirst("div.story")?.text.trim();
         const genre = doc.select("div.catssection li a").map(e => e.text);
-        const status = 1;
+        const status = 1; 
 
         const chapters = [];
         const episodeElements = doc.select("section.allepcont div.row a");
@@ -212,7 +210,8 @@ class DefaultExtension extends MProvider {
                     chapters.push({ name: cleanEpName, url: epUrl });
                 }
             });
-        } else {
+        }
+        else { 
             chapters.push({ name: this._titleEdit("مشاهدة"), url: url + "watch/" }); 
         }
 
@@ -235,7 +234,7 @@ class DefaultExtension extends MProvider {
             const bPreferred = b.quality.includes(preferredQuality);
             if (aPreferred && !bPreferred) return -1;
             if (!aPreferred && bPreferred) return 1;
-            return 0;
+            return 0; 
         });
 
         return videos;
@@ -244,7 +243,7 @@ class DefaultExtension extends MProvider {
     async _extractVideos(element) {
         const serverUrl = element.attr("data-link");
         const serverName = element.text;
-        const urlHost = new URL(serverUrl).hostname;
+        const urlHost = new URL(serverUrl).hostname; 
 
         const defaultHeaders = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.75 Safari/537.36",
@@ -259,7 +258,7 @@ class DefaultExtension extends MProvider {
         if (urlHost.includes("mixdrop.ps") || urlHost.includes("mixdrop.co") || urlHost.includes("mixdrop.to") || urlHost.includes("mixdrop.sx") || urlHost.includes("mixdrop.bz") || urlHost.includes("mixdrop.ch") || urlHost.includes("mixdrp.co") || urlHost.includes("mixdrp.to") || urlHost.includes("mixdrop.gl") || urlHost.includes("mixdrop.club") || urlHost.includes("mixdroop.bz") || urlHost.includes("mixdroop.co") || urlHost.includes("mixdrop.vc") || urlHost.includes("mixdrop.ag") || urlHost.includes("mdy48tn97.com") || urlHost.includes("md3b0j6hj.com") || urlHost.includes("mdbekjwqa.pw") || urlHost.includes("mdfx9dc8n.net") || urlHost.includes("mixdropjmk.pw") || urlHost.includes("mixdrop21.net") || urlHost.includes("mixdrop.is") || urlHost.includes("mixdrop.si") || urlHost.includes("mixdrop23.net") || urlHost.includes("mixdrop.nu") || urlHost.includes("mixdrop.ms") || urlHost.includes("mdzsmutpcvykb.net") || urlHost.includes("mxdrop.to")) {
             return await this._resolveMixDrop(serverUrl, defaultHeaders);
         }
-        return [];
+        return []; 
     }
 
     async _jsUnpack(packedJS) {
@@ -551,5 +550,4 @@ class DefaultExtension extends MProvider {
     }
 }
 
-// هذه السطر ضروري: إنشاء مثيل (instance) للكلاس ليتم التعرف عليه واستخدامه بواسطة Mangayomi.
 new DefaultExtension();
