@@ -330,10 +330,6 @@ class DefaultExtension extends MProvider {
                 }
 
                 // Process other direct download links by quality block
-                // IMPORTANT: The preferredDownloadServers list now only contains "vidtube".
-                // This means the following block will only add videos IF their serverKey is "vidtube".
-                // Since none of these direct links are VidTube, this section will effectively do nothing
-                // unless the preferredDownloadServers is changed in the future.
                 const downloadBlocks = downloadDoc.select("div.DownloadBlock");
                 for (const block of downloadBlocks) {
                     const qualityTitle = block.selectFirst("h2.download-title span")?.text.trim(); // e.g., "1080p"
@@ -672,8 +668,7 @@ class DefaultExtension extends MProvider {
                     const videoObject = {
                         url: finalVideoUrl,
                         originalUrl: vidtubeDirectLinkUrl,
-                        // Display VidTube with quality and the final direct URL
-                        quality: `VidTube - ${quality || 'Auto'} (${finalVideoUrl})` 
+                        quality: `VidTube - ${quality || 'Auto'} (${finalVideoUrl})` // Include final URL
                     };
                     console.log("Debug: Successfully extracted VidTube video:", videoObject);
                     return videoObject;
@@ -684,7 +679,6 @@ class DefaultExtension extends MProvider {
             return {
                 url: vidtubeDirectLinkUrl, // Fallback URL: the page URL itself
                 originalUrl: vidtubeDirectLinkUrl,
-                // Display VidTube with quality and the page URL, indicating no direct link found
                 quality: `VidTube - ${quality || 'Auto'} (No Direct Link Found - ${vidtubeDirectLinkUrl})`
             };
         } catch (error) {
@@ -693,7 +687,6 @@ class DefaultExtension extends MProvider {
             return {
                 url: vidtubeDirectLinkUrl, // Fallback URL: the page URL itself
                 originalUrl: vidtubeDirectLinkUrl,
-                // Display VidTube with quality and the page URL, indicating an error
                 quality: `VidTube - ${quality || 'Auto'} (Error - ${vidtubeDirectLinkUrl})`
             };
         }
@@ -766,7 +759,7 @@ class DefaultExtension extends MProvider {
             listPreference: {
                 title: "الجودة المفضلة",
                 summary: "اختر الجودة المفضلة لديك",
-                value: "720", 
+                value: "720", // Explicitly setting the default value to "720" (for 720p)
                 entries: ["720p", "480p", "360p", "Auto"], 
                 entryValues: ["720", "480", "360", "Auto"], 
             }
@@ -775,10 +768,19 @@ class DefaultExtension extends MProvider {
             multiSelectListPreference: {
                 title: "سيرفرات التحميل المفضلة",
                 summary: "اختر سيرفرات التحميل التي تفضل ظهورها. (تنطبق فقط على روابط التحميل المباشر).",
-                // Only VidTube is available for selection
-                values: ["vidtube"], // Default to only VidTube selected
-                entries: ["VidTube (متعدد الجودات)"], 
-                entryValues: ["vidtube"], 
+                // Defaulting to all of them selected.
+                values: [
+                    "vidtube", "updown", "bowfile", "mdiaload", "ddownload", "nitroflare",
+                    "1fichier", "rapidgator", "savefiles", "1cloudfile"
+                ],
+                entries: [
+                    "VidTube (متعدد الجودات)", "UpDown", "BowFile", "Mdiaload", "DDownload", "Nitroflare",
+                    "1Fichier", "Rapidgator", "Savefiles", "CloudFile"
+                ],
+                entryValues: [
+                    "vidtube", "updown", "bowfile", "mdiaload", "ddownload", "nitroflare",
+                    "1fichier", "rapidgator", "savefiles", "1cloudfile"
+                ],
             }
         }];
     }
