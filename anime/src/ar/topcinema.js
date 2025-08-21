@@ -34,156 +34,102 @@ class DefaultExtension extends MProvider {
     }
 
     /**
-     * وظيفة شاملة لتنظيف وتنسيق عناوين الأفلام والمسلسلات.
-     * تطبق سلسلة من القواعد لجعل العناوين موجزة ومتسقة.
+     * يقوم بتنظيف وتنسيق عناوين الأفلام والمسلسلات بناءً على قواعد محددة.
      * @param {string} title العنوان الأصلي المراد معالجته.
      * @returns {string} العنوان بعد التنظيف والتنسيق.
      */
     _titleEdit(title) { 
-        let editedTitle = title ? title.trim() : ""; 
-        if (!editedTitle) return editedTitle;
+        let editedTitle = title;
 
-        // Normalize different types of hyphens/dashes
-        editedTitle = editedTitle.replace(/[\u2013\u2014\u2015\u2212]/g, '-');
-
-        // 1. Remove content within parentheses and square brackets, along with surrounding spaces.
-        // This targets common irrelevant data like quality, source tags, etc.
-        editedTitle = editedTitle.replace(/\s*\(.*?\)\s*/g, ' ');
-        editedTitle = editedTitle.replace(/\s*\[.*?\]\s*/g, ' ');
-
-        // 2. Extract and remove a 4-digit year if present (e.g., "Movie Title 2023").
-        // The year will be appended at the end in parentheses if found.
-        let extractedYear = '';
-        editedTitle = editedTitle.replace(/\b(\d{4})\b/, (match, p1) => {
-            extractedYear = p1;
-            return ''; // Remove the year from the title for further processing
-        });
-
-        // 3. Remove common Arabic prefixes like "فيلم", "مسلسل", "عرض", "برنامج", "انمي"
-        // These prefixes indicate the type of media and are often redundant in a standardized display.
-        editedTitle = editedTitle.replace(/^(?:فيلم|عرض|مسلسل|برنامج|انمي)\s+/i, '');
-
-        // 4. Map Arabic season words (e.g., "الاول", "الثاني") to their numeric equivalents.
-        // This makes season numbering consistent (e.g., "الموسم 1").
         const arabicSeasonMap = {
             "الاول": "1", "الثاني": "2", "الثالث": "3", "الرابع": "4", "الخامس": "5",
             "السادس": "6", "السابع": "7", "الثامن": "8", "التاسع": "9", "العاشر": "10",
-            "الحادي عشر": "11", "الثاني عشر": "12", "الثالث عشر": "13", "الرابع عشر": "14", "الخامس عشر": "15",
-            "السادس عشر": "16", "السابع عشر": "17", "الثامن عشر": "18", "التاسع عشر": "19", "العشرون": "20",
-            "الحادي والعشرون": "21", "الثاني والعشرون": "22", "الثالث والعشرون": "23", "الرابع والعشرون": "24", "الخامس والعشرون": "25",
-            "السادس والعشرون": "26", "السابع والعشرون": "27", "الثامن والعشرون": "28", "التاسع والعشرون": "29", "الثلاثون": "30",
-            // Add more if necessary for higher season numbers
+            "الحادي عشر": "11", "الثاني عشر": "12", "الثالث عشر": "13", "الرابع عشر": "14", "الخامس عشر": "15"
         };
 
-        for (const key in arabicSeasonMap) {
-            // Use word boundary `\b` to match the full word and `(?:ال)*` to handle optional "ال" (the) prefix
-            const regex = new RegExp(`الموسم\\s*(?:ال)*${key}\\b`, 'g'); 
-            editedTitle = editedTitle.replace(regex, `الموسم ${arabicSeasonMap[key]}`);
-        }
-        // Convert "الموسم N" to standard "sN" format (e.g., "s1", "s2").
-        editedTitle = editedTitle.replace(/الموسم\s*(\d+)/g, 's$1');
-
-        // 5. Handle episode formatting: Convert "الحلقة N" to "E N" or "E<padded_N>".
-        // This ensures consistent episode numbering (e.g., "E1", "E15", "E23").
-        editedTitle = editedTitle.replace(/الحلقة\s*(\d+)/g, (match, p1) => {
-            const episodeNumber = parseInt(p1, 10); // Convert to integer to handle leading zeros if any
-            return `E${episodeNumber}`; // Format as E1, E2, etc.
+        // 1. استخراج السنة (4 أرقام) من أي مكان في العنوان وحفظها لإضافتها لاحقًا في النهاية.
+        let extractedYear = '';
+        editedTitle = editedTitle.replace(/(\b\d{4}\b)/, (match, p1) => {
+            extractedYear = p1; 
+            return ''; 
         });
 
-        // 6. Remove common suffixes, descriptive terms, and quality tags.
-        // These are often redundant and can clutter the main title.
-        editedTitle = editedTitle.replace(
-            /\s+(?:مترجم|مترجمة|مدبلج|مدبلجة|اون لاين|اونلاين|كامل|بجودة عالية|جودة عالية|شاشة كاملة|حصريا|حصري|الاصلي|نسخة اصلية|برابط مباشر|للمشاهدة|المشاهدة|مشاهدة|جودات متعددة|جودات|والاخيرة)\s*$/gi,
-            ''
-        );
-        editedTitle = editedTitle.replace(
-            /\b(?:HD|4K|FHD|UHD|HDRip|BluRay|WEB-DL|BRRip|DVDRip|HDTV|x264|x265|AAC|EAC3|DDP|5\.1|7\.1|اتش دي|720p|1080p|2160p|h\.264|h\.265)\b/gi,
-            ''
-        );
-        // Remove "End" if it was added from "والاخيرة" (not needed with the new suffix removal).
-        editedTitle = editedTitle.replace(/\s+End\b/gi, '');
+        // 2. إزالة البادئات الشائعة في بداية العنوان (فيلم, عرض, مسلسل, برنامج, انمي).
+        // هذا السطر يزيل "مسلسل " إذا كانت في البداية.
+        editedTitle = editedTitle.replace(/^(?:فيلم|عرض|مسلسل|برنامج|انمي)\s+/, '');
 
+        // 3. تحويل عبارة "والاخيرة" إلى "End".
+        editedTitle = editedTitle.replace(/\s+والاخيرة\b/g, ' End'); 
 
-        // 7. Normalize multiple spaces to a single space.
-        // This cleans up any extra spaces left after replacements.
-        editedTitle = editedTitle.replace(/\s+/g, ' ');
+        // 4. معالجة الموسم: تحويل "الموسم X" إلى "sX".
+        // أ. تحويل أسماء المواسم العربية النصية إلى أرقام.
+        for (const key in arabicSeasonMap) {
+            const regex = new RegExp(`الموسم\\s*${key}\\b`, 'g'); 
+            editedTitle = editedTitle.replace(regex, `الموسم ${arabicSeasonMap[key]}`);
+        }
+        // ب. تحويل "الموسم رقم" إلى "sرقم".
+        editedTitle = editedTitle.replace(/الموسم\s*(\d+)/g, 's$1');
 
-        // 8. Append the extracted year back to the end of the title, in parentheses.
+        // 5. معالجة "الحلقة XXXX" (برقم كبير، 3 أرقام أو أكثر) كـ 'موسم' ضمني "s XXXX".
+        editedTitle = editedTitle.replace(/الحلقة\s*(\d{3,})/g, 's$1');
+
+        // 6. معالجة باقي الحلقات: تحويل "الحلقة Y" إلى "ep Y".
+        editedTitle = editedTitle.replace(/الحلقة\s*(\d+)/g, 'ep $1');
+
+        // 7. إزالة اللواحق الشائعة في نهاية العنوان (مترجم, مترجمة, اون لاين).
+        // هذا السطر يزيل "مترجم" إذا كانت في النهاية.
+        editedTitle = editedTitle.replace(/\s+(?:مترجم|مترجمة|اون لاين)\s*$/, '');
+
+        // 8. تنظيف المسافات: استبدال المسافات المتعددة بمسافة واحدة وتقليم العنوان.
+        editedTitle = editedTitle.replace(/\s+/g, ' ').trim();
+
+        // 9. إضافة السنة المستخرجة إلى نهاية العنوان إذا وجدت.
         if (extractedYear) {
-            editedTitle += ` (${extractedYear})`;
+            editedTitle += ` ${extractedYear}`;
         }
 
-        // 9. Final trim to remove any leading/trailing spaces.
+        // 10. تنظيف نهائي للمسافات.
         return editedTitle.trim();
-    }
-
-    /**
-     * وظيفة مساعدة لجلب ومعالجة عناصر القائمة (الأفلام والمسلسلات).
-     * إذا كان العنصر مسلسلًا، فإنه يقوم بطلب صفحة تفاصيله لجلب مواسمه وعرضها كعناصر منفصلة.
-     * @param {Document} doc وثيقة HTML للصفحة الحالية.
-     * @returns {Promise<Array<any>>} مصفوفة بالعناصر المعالجة (أفلام أو مواسم مسلسلات).
-     */
-    async _processListingItems(doc) {
-        const list = [];
-        const items = doc.select("div.Block--Item, div.Small--Box");
-        const imageAttr = "data-src"; 
-
-        for (const item of items) { 
-            const linkElement = item.selectFirst("a");
-            if (!linkElement) continue;
-
-            const link = linkElement.getHref;
-            // محاولة استخراج العنوان لعناصر القائمة الرئيسية
-            const rawTitle = linkElement.attr("title") || item.selectFirst("h3.title")?.text;
-            const name = this._titleEdit(rawTitle); 
-            const imageUrl = item.selectFirst("img")?.attr(imageAttr);
-
-            if (link.includes('/series/')) {
-                try {
-                    const seriesDetailPageDoc = await this.requestDoc(link.replace(this.source.baseUrl, ''));
-                    const seasonElements = seriesDetailPageDoc.select("section.allseasonss div.Small--Box.Season");
-
-                    if (seasonElements.length > 0) {
-                        for (const seasonItem of seasonElements) {
-                            const seasonLinkElement = seasonItem.selectFirst("a");
-                            if (!seasonLinkElement) continue;
-
-                            // ***** التعديل هنا: محاولة استخراج العنوان لعناصر المواسم *****
-                            // أولاً من 'title' لعنصر الرابط، ثم من نص 'h3.title' داخل عنصر الموسم إذا وجد
-                            const seasonRawTitle = seasonLinkElement.attr("title") || seasonItem.selectFirst("h3.title")?.text;
-                            const seasonName = this._titleEdit(seasonRawTitle);
-                            // **********************************************************
-
-                            const seasonImageUrl = seasonItem.selectFirst("img")?.attr(imageAttr); 
-                            const seasonLink = seasonLinkElement.getHref;
-
-                            list.push({ name: seasonName, imageUrl: seasonImageUrl, link: seasonLink });
-                        }
-                    } else {
-                        // في حال عدم العثور على مواسم (ندرة أو خطأ في الهيكل)، أضف العنصر الرئيسي للمسلسل كخيار احتياطي
-                        list.push({ name, imageUrl, link });
-                    }
-                } catch (error) {
-                    console.error(`Error processing series ${name} (${link}):`, error);
-                    list.push({ name, imageUrl, link });
-                }
-            } else {
-                list.push({ name, imageUrl, link });
-            }
-        }
-        return list;
     }
 
     async getPopular(page) {
         const doc = await this.requestDoc(`/movies/page/${page}/`); 
-        const list = await this._processListingItems(doc); 
+        const list = [];
+        const items = doc.select("div.Block--Item, div.Small--Box");
+        const imageAttr = "data-src"; 
+
+        items.forEach(item => {
+            const linkElement = item.selectFirst("a");
+            if (!linkElement) return;
+
+            const name = this._titleEdit(linkElement.attr("title"));
+            const imageUrl = item.selectFirst("img")?.attr(imageAttr); 
+            const link = linkElement.getHref;
+
+            list.push({ name, imageUrl, link });
+        });
+
         const hasNextPage = !!doc.selectFirst("div.pagination ul.page-numbers li a.next");
         return { list, hasNextPage };
     }
 
     async getLatestUpdates(page) {
         const doc = await this.requestDoc(`/recent/page/${page}/`);
-        const list = await this._processListingItems(doc); 
+        const list = [];
+        const items = doc.select("div.Block--Item, div.Small--Box");
+        const imageAttr = "data-src";
+
+        items.forEach(item => {
+            const linkElement = item.selectFirst("a");
+            if (!linkElement) return;
+
+            const name = this._titleEdit(linkElement.attr("title"));
+            const imageUrl = item.selectFirst("img")?.attr(imageAttr);
+            const link = linkElement.getHref;
+
+            list.push({ name, imageUrl, link });
+        });
+
         const hasNextPage = !!doc.selectFirst("div.pagination ul.page-numbers li a.next");
         return { list, hasNextPage };
     }
@@ -191,6 +137,8 @@ class DefaultExtension extends MProvider {
     async search(query, page, filters) {
         let path;
         const categoryFilter = filters[0];   
+
+        const imageAttr = "data-src"; 
 
         if (query) {
             const offset = page - 1; 
@@ -216,7 +164,21 @@ class DefaultExtension extends MProvider {
         }
 
         const doc = await this.requestDoc(path); 
-        const list = await this._processListingItems(doc); 
+        
+        const list = [];
+        const items = doc.select("div.Small--Box, div.Block--Item"); 
+
+        items.forEach(item => {
+            const linkElement = item.selectFirst("a");
+            if (!linkElement) return;
+
+            const name = this._titleEdit(linkElement.attr("title"));
+            const imageUrl = item.selectFirst("img")?.attr(imageAttr); 
+            const link = linkElement.getHref;
+
+            list.push({ name, imageUrl, link });
+        });
+
         const hasNextPage = !!doc.selectFirst("div.pagination ul.page-numbers li a.next");
         return { list, hasNextPage };
     }
@@ -229,7 +191,7 @@ class DefaultExtension extends MProvider {
         const imageUrl = doc.selectFirst("div.left div.image img")?.getSrc;
         const description = doc.selectFirst("div.story")?.text.trim();
         const genre = doc.select("div.catssection li a").map(e => e.text);
-        const status = 1; 
+        const status = 1;
 
         const chapters = [];
         const episodeElements = doc.select("section.allepcont div.row a");
@@ -242,18 +204,15 @@ class DefaultExtension extends MProvider {
             });
 
             sortedEpisodes.forEach(ep => {
-                const epUrl = ep.getHref; // Base URL for the episode's detail page
+                const epUrl = ep.getHref + "watch/";
                 const epTitleAttribute = ep.attr("title"); 
 
                 if (epTitleAttribute) {
                     const cleanEpName = this._titleEdit(epTitleAttribute);
-                    // Append "watch/" to the episode URL to get to the watch page
-                    chapters.push({ name: cleanEpName, url: epUrl + "watch/" }); 
+                    chapters.push({ name: cleanEpName, url: epUrl });
                 }
             });
-        }
-        else { 
-            // For single movies or cases where episodes aren't listed
+        } else {
             chapters.push({ name: this._titleEdit("مشاهدة"), url: url + "watch/" }); 
         }
 
@@ -261,135 +220,31 @@ class DefaultExtension extends MProvider {
     }
 
     async getVideoList(url) {
-        const videos = [];
-        const defaultHeaders = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.75 Safari/537.36",
-        };
+        const doc = await this.requestDoc(url.replace(this.source.baseUrl, ''));
+        const serverElements = doc.select("div.watch--servers--list ul li.server--item");
 
-        let watchPageUrl = '';
-        let downloadPageUrl = '';
-
-        // Determine if the incoming URL is a watch page, download page, or a detail page.
-        // The getDetail function passes ".../watch/" URLs.
-        if (url.endsWith('/watch/')) {
-            watchPageUrl = url;
-            downloadPageUrl = url.replace('/watch/', '/download/');
-        } else if (url.endsWith('/download/')) {
-            // If getVideoList is somehow called directly with a download URL, handle it.
-            downloadPageUrl = url;
-            // We can't reliably derive the watch page from a download page URL without fetching the detail page first.
-            // For now, we'll assume it's just a download request in this scenario.
-        } else {
-            // If it's a detail page URL (e.g., .../episode-title/),
-            // this is less common for getVideoList but handled.
-            watchPageUrl = url + 'watch/';
-            downloadPageUrl = url + 'download/';
+        let videos = [];
+        for (const element of serverElements) {
+            const extracted = await this._extractVideos(element);
+            if (extracted && extracted.length > 0) videos.push(...extracted);
         }
 
-        // --- Path A: Process the WATCH page for streaming servers (if applicable) ---
-        if (watchPageUrl) {
-            try {
-                const watchDoc = await this.requestDoc(watchPageUrl.replace(this.source.baseUrl, ''), defaultHeaders);
-
-                // Extract streaming servers
-                const serverElements = watchDoc.select("div.watch--servers--list ul li.server--item");
-                for (const element of serverElements) {
-                    const extracted = await this._extractVideos(element);
-                    if (extracted && extracted.length > 0) videos.push(...extracted);
-                }
-            } catch (error) {
-                console.warn(`Error processing watch page ${watchPageUrl}:`, error);
-                // Continue to try the download page even if watch page fails
-            }
-        }
-
-        // --- Path B: Process the DOWNLOAD page for direct download links (if applicable) ---
-        if (downloadPageUrl) {
-            try {
-                // Get preferred download servers from preferences
-                const preferredDownloadServers = this.getPreference("preferred_download_servers") || [];
-
-                // Use the watchPageUrl as referer if available, otherwise the original 'url' (which could be the downloadPageUrl itself)
-                const downloadDoc = await this.requestDoc(downloadPageUrl.replace(this.source.baseUrl, ''), { "Referer": watchPageUrl || url });
-                
-                // Process VidTube links (multi-quality download server)
-                const proServerLinks = downloadDoc.select("div.proServer a.downloadsLink.proServer");
-                
-                // Only process VidTube if it's in the preferred list
-                if (preferredDownloadServers.includes("vidtube")) {
-                    for (const proLink of proServerLinks) {
-                        const proServerUrl = proLink.getHref;
-                        if (proServerUrl.includes("vidtube.pro")) {
-                            console.log(`Debug: Found VidTube proServer link: ${proServerUrl}`);
-                            const vidtubeVideos = await this._resolveVidTubeDownloadPage(proServerUrl, { "Referer": downloadPageUrl });
-                            if (vidtubeVideos && vidtubeVideos.length > 0) {
-                                videos.push(...vidtubeVideos);
-                            }
-                        }
-                    }
-                }
-
-                // Process other direct download links by quality block
-                const downloadBlocks = downloadDoc.select("div.DownloadBlock");
-                for (const block of downloadBlocks) {
-                    const qualityTitle = block.selectFirst("h2.download-title span")?.text.trim(); // e.g., "1080p"
-                    const downloadItems = block.select("ul.download-items li a.downloadsLink");
-                    for (const downloadItem of downloadItems) {
-                        const downloadUrl = downloadItem.getHref;
-                        const hostNameText = downloadItem.selectFirst("div.text span")?.text.trim(); // e.g., "UpDown"
-                        const itemQuality = downloadItem.selectFirst("div.text p")?.text.trim(); // e.g., "1080p"
-
-                        let serverKey = '';
-                        // Map display name to preference key
-                        if (hostNameText) {
-                            switch (hostNameText.toLowerCase()) {
-                                case 'updown': serverKey = 'updown'; break;
-                                case 'bowfile': serverKey = 'bowfile'; break;
-                                case 'mdiaload': serverKey = 'mdiaload'; break;
-                                case 'ddownload': serverKey = 'ddownload'; break;
-                                case 'nitroflare': serverKey = 'nitroflare'; break;
-                                case '1fichier': serverKey = '1fichier'; break;
-                                case 'rapidgator': serverKey = 'rapidgator'; break;
-                                case 'savefiles': serverKey = 'savefiles'; break;
-                                case 'cloudfile': serverKey = '1cloudfile'; break;
-                                default: serverKey = ''; break; // Unknown server
-                            }
-                        }
-                        
-                        // Only add if the server's key is in the preferred list
-                        if (downloadUrl && preferredDownloadServers.includes(serverKey)) {
-                            console.log(`Debug: Adding direct download link: ${hostNameText} - ${itemQuality || qualityTitle}`);
-                            videos.push({
-                                url: downloadUrl,
-                                originalUrl: downloadUrl,
-                                quality: `${hostNameText || 'Direct'} - ${itemQuality || qualityTitle || 'Unknown'} (${downloadUrl})`.trim()
-                            });
-                        }
-                    }
-                }
-            } catch (error) {
-                console.warn(`Error processing download page ${downloadPageUrl}:`, error);
-            }
-        }
-
-        // --- Step 3: Sort videos by preferred quality ---
         const preferredQuality = this.getPreference("preferred_quality") || "720";
         videos.sort((a, b) => {
             const aPreferred = a.quality.includes(preferredQuality);
             const bPreferred = b.quality.includes(preferredQuality);
             if (aPreferred && !bPreferred) return -1;
             if (!aPreferred && bPreferred) return 1;
-            return 0; 
+            return 0;
         });
 
-        console.log("Debug: Final video list before return:", videos);
         return videos;
     }
 
     async _extractVideos(element) {
         const serverUrl = element.attr("data-link");
         const serverName = element.text;
-        const urlHost = new URL(serverUrl).hostname; 
+        const urlHost = new URL(serverUrl).hostname;
 
         const defaultHeaders = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.75 Safari/537.36",
@@ -404,7 +259,7 @@ class DefaultExtension extends MProvider {
         if (urlHost.includes("mixdrop.ps") || urlHost.includes("mixdrop.co") || urlHost.includes("mixdrop.to") || urlHost.includes("mixdrop.sx") || urlHost.includes("mixdrop.bz") || urlHost.includes("mixdrop.ch") || urlHost.includes("mixdrp.co") || urlHost.includes("mixdrp.to") || urlHost.includes("mixdrop.gl") || urlHost.includes("mixdrop.club") || urlHost.includes("mixdroop.bz") || urlHost.includes("mixdroop.co") || urlHost.includes("mixdrop.vc") || urlHost.includes("mixdrop.ag") || urlHost.includes("mdy48tn97.com") || urlHost.includes("md3b0j6hj.com") || urlHost.includes("mdbekjwqa.pw") || urlHost.includes("mdfx9dc8n.net") || urlHost.includes("mixdropjmk.pw") || urlHost.includes("mixdrop21.net") || urlHost.includes("mixdrop.is") || urlHost.includes("mixdrop.si") || urlHost.includes("mixdrop23.net") || urlHost.includes("mixdrop.nu") || urlHost.includes("mixdrop.ms") || urlHost.includes("mdzsmutpcvykb.net") || urlHost.includes("mxdrop.to")) {
             return await this._resolveMixDrop(serverUrl, defaultHeaders);
         }
-        return []; 
+        return [];
     }
 
     async _jsUnpack(packedJS) {
@@ -621,77 +476,6 @@ class DefaultExtension extends MProvider {
         }
     }
 
-    // Helper for VidTube multi-quality download page (e.g., https://vidtube.pro/d/vdr56366sevq.html)
-    async _resolveVidTubeDownloadPage(vidtubeHtmlPageUrl, headers = {}) {
-        const videos = [];
-        try {
-            console.log(`Debug: Fetching VidTube multi-quality page: ${vidtubeHtmlPageUrl} with Referer: ${headers.Referer}`);
-            const res = await this.client.get(vidtubeHtmlPageUrl, { headers });
-            const doc = new Document(res.body);
-
-            const downloadOptions = doc.select("div.row.mb-3.justify-content-center a.btn.btn-light");
-            const baseUrl = new URL(vidtubeHtmlPageUrl).origin; // Get base URL for relative paths
-
-            for (const option of downloadOptions) {
-                const relativeLink = option.getHref; // e.g., "/d/vdr56366sevq_x"
-                const fullLink = `${baseUrl}${relativeLink}`;
-                // Extract quality from the bold text or the small muted text
-                const qualityText = option.selectFirst("b.text-primary")?.text.trim() || option.selectFirst("span.small.text-muted")?.text.trim();
-                
-                if (fullLink) {
-                    // Pass the VidTube origin as Referer to the next step, matching browser console behavior
-                    const nextHeaders = { ...headers, "Referer": new URL(fullLink).origin + "/" }; // Referer: https://vidtube.pro/
-                    console.log(`Debug: Found VidTube quality option: ${qualityText} -> ${fullLink}`);
-                    const directVideo = await this._resolveVidTubeDirectLink(fullLink, qualityText, nextHeaders);
-                    if (directVideo) {
-                        videos.push(directVideo);
-                    }
-                }
-            }
-        } catch (error) {
-            console.error(`Error resolving VidTube download options from ${vidtubeHtmlPageUrl}:`, error);
-        }
-        return videos;
-    }
-
-    // Helper for VidTube direct link page (e.g., https://vidtube.pro/d/vdr56366sevq_x)
-    async _resolveVidTubeDirectLink(vidtubeDirectLinkUrl, quality, headers = {}) {
-        try {
-            console.log(`Debug: Fetching VidTube direct link page: ${vidtubeDirectLinkUrl} with Referer: ${headers.Referer}`);
-            const res = await this.client.get(vidtubeDirectLinkUrl, { headers });
-            const doc = new Document(res.body);
-
-            const directLinkElement = doc.selectFirst("a.btn.btn-gradient.submit-btn");
-            if (directLinkElement) {
-                const finalVideoUrl = directLinkElement.getHref;
-                if (finalVideoUrl) {
-                    const videoObject = {
-                        url: finalVideoUrl,
-                        originalUrl: vidtubeDirectLinkUrl,
-                        quality: `VidTube - ${quality || 'Auto'} (${finalVideoUrl})` // Include final URL
-                    };
-                    console.log("Debug: Successfully extracted VidTube video:", videoObject);
-                    return videoObject;
-                }
-            }
-            // Fallback if directLinkElement or finalVideoUrl is not found
-            console.warn(`Debug: Failed to find final video URL on VidTube page: ${vidtubeDirectLinkUrl}. Returning fallback.`);
-            return {
-                url: vidtubeDirectLinkUrl, // Fallback URL: the page URL itself
-                originalUrl: vidtubeDirectLinkUrl,
-                quality: `VidTube - ${quality || 'Auto'} (No Direct Link Found - ${vidtubeDirectLinkUrl})`
-            };
-        } catch (error) {
-            console.error(`Error resolving VidTube final link from ${vidtubeDirectLinkUrl}:`, error);
-            // Fallback on network error
-            return {
-                url: vidtubeDirectLinkUrl, // Fallback URL: the page URL itself
-                originalUrl: vidtubeDirectLinkUrl,
-                quality: `VidTube - ${quality || 'Auto'} (Error - ${vidtubeDirectLinkUrl})`
-            };
-        }
-    }
-
     getFilterList() {
         const categories = [{
             "name": "اختر",
@@ -759,31 +543,13 @@ class DefaultExtension extends MProvider {
             listPreference: {
                 title: "الجودة المفضلة",
                 summary: "اختر الجودة المفضلة لديك",
-                value: "720", // Explicitly setting the default value to "720" (for 720p)
+                valueIndex: 0,
                 entries: ["720p", "480p", "360p", "Auto"], 
                 entryValues: ["720", "480", "360", "Auto"], 
-            }
-        }, {
-            key: "preferred_download_servers",
-            multiSelectListPreference: {
-                title: "سيرفرات التحميل المفضلة",
-                summary: "اختر سيرفرات التحميل التي تفضل ظهورها. (تنطبق فقط على روابط التحميل المباشر).",
-                // Defaulting to all of them selected.
-                values: [
-                    "vidtube", "updown", "bowfile", "mdiaload", "ddownload", "nitroflare",
-                    "1fichier", "rapidgator", "savefiles", "1cloudfile"
-                ],
-                entries: [
-                    "VidTube (متعدد الجودات)", "UpDown", "BowFile", "Mdiaload", "DDownload", "Nitroflare",
-                    "1Fichier", "Rapidgator", "Savefiles", "CloudFile"
-                ],
-                entryValues: [
-                    "vidtube", "updown", "bowfile", "mdiaload", "ddownload", "nitroflare",
-                    "1fichier", "rapidgator", "savefiles", "1cloudfile"
-                ],
             }
         }];
     }
 }
 
+// هذه السطر ضروري: إنشاء مثيل (instance) للكلاس ليتم التعرف عليه واستخدامه بواسطة Mangayomi.
 new DefaultExtension();
