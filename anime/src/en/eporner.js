@@ -11,7 +11,6 @@ const mangayomiSources = [{
 }];
 
 
-
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -45,19 +44,18 @@ class DefaultExtension extends MProvider {
 
     _parseStreamQuality(qualityString) {
         const resMatch = qualityString.match(/(\d{3,4})[pP]/);
-        const codecMatch = qualityString.match(/\(([^)]+)\)/); // This will still get the codec part if it's "codec" or "codec, size"
+        const codecMatch = qualityString.match(/\(([^)]+)\)/);
 
-        const resolution = resMatch ? resMatch[1] : null; // e.g., "1080"
+        const resolution = resMatch ? resMatch[1] : null;
         let codec = null;
         if (codecMatch && codecMatch[1]) {
             const parts = codecMatch[1].split(',').map(p => p.trim());
-            if (parts.length >= 2) { // If it has "codec, size"
-                codec = parts[0].toLowerCase(); // Use the first part as codec
-            } else { // If it's just "codec"
+            if (parts.length >= 2) {
+                codec = parts[0].toLowerCase();
+            } else {
                 codec = codecMatch[1].toLowerCase();
             }
         }
-        // No need to parse size here, as this helper is for resolution/codec matching
 
         return { resolution, codec };
     }
@@ -129,6 +127,8 @@ class DefaultExtension extends MProvider {
     async search(query, page, filters) {
         let url = `${this.getBaseUrl()}/search/${encodeURIComponent(query)}/${page}/`;
 
+        let selectedCategoryValue = "";
+
         for (const filter of filters) {
             if (filter.type_name === "SelectFilter" && filter.name === "Sort By") {
                 const selectedValue = filter.values[filter.state].value;
@@ -139,10 +139,13 @@ class DefaultExtension extends MProvider {
                         url = `${this.getBaseUrl()}/search/${encodeURIComponent(query)}/${selectedValue}/${page}/`;
                     }
                 }
-            } else if (filter.type_name === "GroupFilter" && filter.name === "Categories") {
-                const selectedCategories = filter.state.filter(cb => cb.state).map(cb => cb.value);
-                if (selectedCategories.length > 0) {
-                    url = `${this.getBaseUrl()}/${selectedCategories[0]}/search/${encodeURIComponent(query)}/${page}/`;
+            } else if (filter.type_name === "SelectFilter" && filter.name === "Category") {
+                selectedCategoryValue = filter.values[filter.state].value;
+                if (selectedCategoryValue && selectedCategoryValue !== "") { // If a specific category is selected (not "All" or "Any Category")
+                    // Prepend category path to the URL if a category is selected and not already handled by sort
+                    if (!url.includes("/cat/")) { // Avoid double category path
+                        url = `${this.getBaseUrl()}/${selectedCategoryValue}/search/${encodeURIComponent(query)}/${page}/`;
+                    }
                 }
             }
         }
@@ -228,7 +231,6 @@ class DefaultExtension extends MProvider {
 
         const downloadDiv = doc.selectFirst("div#downloaddiv");
         if (!downloadDiv) {
-            // Fallback to previous XHR method if downloadDiv is not found
             const videoIdMatch = url.match(/\/video\/([a-zA-Z0-9]+)\//);
             if (!videoIdMatch || !videoIdMatch[1]) {
                 console.error("Could not extract video ID from URL for fallback:", url);
@@ -249,7 +251,6 @@ class DefaultExtension extends MProvider {
                             const src = sourceObject.src;
                             const labelShort = sourceObject.labelShort || qualityKey;
 
-                            // XHR response doesn't typically provide file size easily, so we can't add it here.
                             streams.push({
                                 url: src,
                                 originalUrl: src,
@@ -267,19 +268,19 @@ class DefaultExtension extends MProvider {
 
             for (const linkElement of downloadLinks) {
                 const videoUrl = this.getBaseUrl() + linkElement.getHref;
-                const fullQualityText = linkElement.text?.trim() || ""; // e.g., "Download MP4 (240p, AV1, 24.21 MB)"
+                const fullQualityText = linkElement.text?.trim() || "";
 
                 let quality = "Unknown";
                 let codec = "";
-                let fileSize = ""; // New variable for file size
+                let fileSize = "";
 
-                const qualityMatch = fullQualityText.match(/\(([^)]+)\)/); // Matches content inside first parentheses
+                const qualityMatch = fullQualityText.match(/\(([^)]+)\)/);
 
                 if (qualityMatch && qualityMatch[1]) {
                     const parts = qualityMatch[1].split(',').map(p => p.trim());
-                    quality = parts[0] || "Unknown"; // e.g., "240p"
-                    codec = parts[1] ? parts[1].toLowerCase() : ""; // e.g., "av1"
-                    fileSize = parts[2] || ""; // e.g., "24.21 MB"
+                    quality = parts[0] || "Unknown";
+                    codec = parts[1] ? parts[1].toLowerCase() : "";
+                    fileSize = parts[2] || "";
                 }
 
                 let finalQuality = quality;
@@ -287,7 +288,7 @@ class DefaultExtension extends MProvider {
                     finalQuality = `${quality} (${codec})`;
                 }
                 if (fileSize) {
-                    finalQuality = `${finalQuality} - ${fileSize}`; // Append file size
+                    finalQuality = `${finalQuality} - ${fileSize}`;
                 }
 
                 streams.push({
@@ -304,18 +305,16 @@ class DefaultExtension extends MProvider {
         const preferredQualityValue = this.getPreference("preferred_quality");
 
         if (preferredQualityValue !== "auto" && streams.length > 0) {
-            const [prefResRaw, prefCodec] = preferredQualityValue.split('_'); // e.g., ["1080", "av1"]
+            const [prefResRaw, prefCodec] = preferredQualityValue.split('_');
             const prefResNum = parseInt(prefResRaw);
 
             let preferredStreamIndex = -1;
 
-            // First, try to find an exact match (resolution AND codec)
             preferredStreamIndex = streams.findIndex(stream => {
                 const { resolution, codec } = this._parseStreamQuality(stream.quality);
                 return resolution && parseInt(resolution) === prefResNum && codec === prefCodec;
             });
 
-            // If no exact match, try to find a match by resolution only (any codec)
             if (preferredStreamIndex === -1) {
                 preferredStreamIndex = streams.findIndex(stream => {
                     const { resolution } = this._parseStreamQuality(stream.quality);
@@ -358,41 +357,85 @@ class DefaultExtension extends MProvider {
                 value: "most-viewed"
             }]
         }, {
-            type_name: "GroupFilter",
-            name: "Categories",
-            state: [{
-                type_name: "CheckBox",
-                name: "HD 1080p",
-                value: "cat/hd-1080p"
-            }, {
-                type_name: "CheckBox",
-                name: "4K Porn",
-                value: "cat/4k-porn"
-            }, {
-                type_name: "CheckBox",
-                name: "60 FPS",
-                value: "cat/60fps"
-            }, {
-                type_name: "CheckBox",
-                name: "Anal",
-                value: "cat/anal"
-            }, {
-                type_name: "CheckBox",
-                name: "Asian",
-                value: "cat/asian"
-            }, {
-                type_name: "CheckBox",
-                name: "Big Tits",
-                value: "cat/big-tits"
-            }, {
-                type_name: "CheckBox",
-                name: "Brazzers",
-                value: "cat/brazzers"
-            }, {
-                type_name: "CheckBox",
-                name: "Creampie",
-                value: "cat/creampie"
-            }]
+            type_name: "SelectFilter",
+            name: "Category",
+            state: 0,
+            values: [
+                { type_name: "SelectOption", name: "Any Category", value: "" },
+                { type_name: "SelectOption", name: "All", value: "all" }, // Added 'All' as per your request
+                { type_name: "SelectOption", name: "4K Ultra HD", value: "cat/4k-porn" },
+                { type_name: "SelectOption", name: "60 FPS", value: "cat/60fps" },
+                { type_name: "SelectOption", name: "Amateur", value: "cat/amateur" },
+                { type_name: "SelectOption", name: "Anal", value: "cat/anal" },
+                { type_name: "SelectOption", name: "Asian", value: "cat/asian" },
+                { type_name: "SelectOption", name: "ASMR", value: "cat/asmr" },
+                { type_name: "SelectOption", name: "BBW", value: "cat/bbw" },
+                { type_name: "SelectOption", name: "BDSM", value: "cat/bdsm" },
+                { type_name: "SelectOption", name: "Big Ass", value: "cat/big-ass" },
+                { type_name: "SelectOption", name: "Big Dick", value: "cat/big-dick" },
+                { type_name: "SelectOption", name: "Big Tits", value: "cat/big-tits" },
+                { type_name: "SelectOption", name: "Bisexual", value: "cat/bisexual" },
+                { type_name: "SelectOption", name: "Blonde", value: "cat/blonde" },
+                { type_name: "SelectOption", name: "Blowjob", value: "cat/blowjob" },
+                { type_name: "SelectOption", name: "Bondage", value: "cat/bondage" },
+                { type_name: "SelectOption", name: "Brunette", value: "cat/brunette" },
+                { type_name: "SelectOption", name: "Bukkake", value: "cat/bukkake" },
+                { type_name: "SelectOption", name: "Creampie", value: "cat/creampie" },
+                { type_name: "SelectOption", name: "Cumshot", value: "cat/cumshot" },
+                { type_name: "SelectOption", name: "Double Penetration", value: "cat/double-penetration" },
+                { type_name: "SelectOption", name: "Ebony", value: "cat/ebony" },
+                { type_name: "SelectOption", name: "Fat", value: "cat/fat" },
+                { type_name: "SelectOption", name: "Fetish", value: "cat/fetish" },
+                { type_name: "SelectOption", name: "Fisting", value: "cat/fisting" },
+                { type_name: "SelectOption", name: "Footjob", value: "cat/footjob" },
+                { type_name: "SelectOption", name: "For Women", value: "cat/for-women" },
+                { type_name: "SelectOption", name: "Gay", value: "cat/gay" },
+                { type_name: "SelectOption", name: "Group Sex", value: "cat/group-sex" },
+                { type_name: "SelectOption", name: "Handjob", value: "cat/handjob" },
+                { type_name: "SelectOption", name: "Hardcore", value: "cat/hardcore" },
+                { type_name: "SelectOption", name: "HD Porn 1080p", value: "cat/hd-1080p" },
+                { type_name: "SelectOption", name: "HD Sex", value: "cat/hd-sex" },
+                { type_name: "SelectOption", name: "Hentai", value: "cat/hentai" },
+                { type_name: "SelectOption", name: "Homemade", value: "cat/homemade" },
+                { type_name: "SelectOption", name: "Hotel", value: "cat/hotel" },
+                { type_name: "SelectOption", name: "Housewives", value: "cat/housewives" },
+                { type_name: "SelectOption", name: "HQ Porn", value: "cat/hq-porn" },
+                { type_name: "SelectOption", name: "Indian", value: "cat/indian" },
+                { type_name: "SelectOption", name: "Interracial", value: "cat/interracial" },
+                { type_name: "SelectOption", name: "Japanese", value: "cat/japanese" },
+                { type_name: "SelectOption", name: "Latina", value: "cat/latina" },
+                { type_name: "SelectOption", name: "Lesbian", value: "cat/lesbians" }, // Note: value is 'lesbians'
+                { type_name: "SelectOption", name: "Lingerie", value: "cat/lingerie" },
+                { type_name: "SelectOption", name: "Massage", value: "cat/massage" },
+                { type_name: "SelectOption", name: "Masturbation", value: "cat/masturbation" },
+                { type_name: "SelectOption", name: "Mature", value: "cat/mature" },
+                { type_name: "SelectOption", name: "MILF", value: "cat/milf" },
+                { type_name: "SelectOption", name: "Nurses", value: "cat/nurse" },
+                { type_name: "SelectOption", name: "Office", value: "cat/office" },
+                { type_name: "SelectOption", name: "Older Men", value: "cat/old-man" },
+                { type_name: "SelectOption", name: "Orgy", value: "cat/orgy" },
+                { type_name: "SelectOption", name: "Outdoor", value: "cat/outdoor" },
+                { type_name: "SelectOption", name: "Petite", value: "cat/petite" },
+                { type_name: "SelectOption", name: "Pornstar", value: "cat/pornstar" },
+                { type_name: "SelectOption", name: "POV", value: "cat/pov-porn" },
+                { type_name: "SelectOption", name: "Public", value: "cat/public" },
+                { type_name: "SelectOption", name: "Redhead", value: "cat/redhead" },
+                { type_name: "SelectOption", name: "Shemale", value: "cat/shemale" },
+                { type_name: "SelectOption", name: "Sleep", value: "cat/sleep" },
+                { type_name: "SelectOption", name: "Small Tits", value: "cat/small-tits" },
+                { type_name: "SelectOption", name: "Squirt", value: "cat/squirt" },
+                { type_name: "SelectOption", name: "Striptease", value: "cat/striptease" },
+                { type_name: "SelectOption", name: "Students", value: "cat/students" },
+                { type_name: "SelectOption", name: "Swinger", value: "cat/swingers" },
+                { type_name: "SelectOption", name: "Teen", value: "cat/teens" }, // Note: value is 'teens'
+                { type_name: "SelectOption", name: "Threesome", value: "cat/threesome" },
+                { type_name: "SelectOption", name: "Toys", value: "cat/toys" },
+                { type_name: "SelectOption", name: "Uncategorized", value: "cat/uncategorized" },
+                { type_name: "SelectOption", name: "Uniform", value: "cat/uniform" },
+                { type_name: "SelectOption", name: "Vintage", value: "cat/vintage" },
+                { type_name: "SelectOption", name: "VR Porn", value: "cat/vr-porn" },
+                { type_name: "SelectOption", name: "Webcam", value: "cat/webcam" }
+            ]
         }];
     }
 
