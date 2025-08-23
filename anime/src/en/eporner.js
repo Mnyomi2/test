@@ -1,15 +1,15 @@
 const mangayomiSources = [{
     "name": "Eporner",
-    "id": 1696969696969,
+    "id": 8911658567,
     "lang": "en",
     "baseUrl": "https://www.eporner.com",
-    "apiUrl": "",
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://www.eporner.com",
     "typeSource": "single",
     "itemType": 1,
-    "version": "1.0.1",
+    "version": "1.0.0",
     "pkgPath": "anime/src/en/eporner.js"
 }];
+
 
 class DefaultExtension extends MProvider {
     constructor() {
