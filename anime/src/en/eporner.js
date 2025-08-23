@@ -11,6 +11,7 @@ const mangayomiSources = [{
 }];
 
 
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -65,7 +66,7 @@ class DefaultExtension extends MProvider {
         const link = this.getBaseUrl() + (linkElement?.getHref || "/");
 
         const imageElement = item.selectFirst("img");
-        const imageUrl = imageElement?.getSrc || imageElement?.attr("data-src") || "";
+        const imageUrl = imageElement?.attr("data-src") || imageElement?.getSrc || "";
 
         const name = imageElement?.attr("alt")?.trim() || "Unknown Title";
 
@@ -141,9 +142,8 @@ class DefaultExtension extends MProvider {
                 }
             } else if (filter.type_name === "SelectFilter" && filter.name === "Category") {
                 selectedCategoryValue = filter.values[filter.state].value;
-                if (selectedCategoryValue && selectedCategoryValue !== "") { // If a specific category is selected (not "All" or "Any Category")
-                    // Prepend category path to the URL if a category is selected and not already handled by sort
-                    if (!url.includes("/cat/")) { // Avoid double category path
+                if (selectedCategoryValue && selectedCategoryValue !== "") {
+                    if (!url.includes("/cat/")) {
                         url = `${this.getBaseUrl()}/${selectedCategoryValue}/search/${encodeURIComponent(query)}/${page}/`;
                     }
                 }
@@ -176,22 +176,24 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
 
-        const name = doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim() || "Unknown Title";
+        const h1TitleElement = doc.selectFirst("div#video-info h1");
+        const name = h1TitleElement?.text?.trim() || "Unknown Title";
         const imageUrl = doc.selectFirst("[property='og:image']")?.attr("content")?.trim() || "";
-        const videoDescription = doc.selectFirst("div.video-description")?.text?.trim();
-        const pageDescription = doc.selectFirst("meta[property=og:description]")?.attr("content")?.trim();
-        const durationText = doc.selectFirst("span.vid-length")?.text?.trim() || "";
 
-        let description = videoDescription || pageDescription || "No description available.";
-        if (pageDescription && pageDescription.includes("Eporner is the largest hd porn source.")) {
-            description = pageDescription.replace(" Eporner is the largest hd porn source.", "");
+        let description = doc.selectFirst("meta[property=og:description]")?.attr("content")?.trim() || "";
+
+        if (description.includes("Eporner is the largest hd porn source.")) {
+            description = description.replace(" Eporner is the largest hd porn source.", "").trim();
         }
-        if (videoDescription && description !== videoDescription) {
-             description = `${videoDescription}. ${description}`;
+
+        const videoDescription = doc.selectFirst("div.video-description")?.text?.trim();
+
+        if (videoDescription) {
+            description = `${videoDescription}${description ? `. ${description}` : ''}`;
         }
-        if (pageDescription && pageDescription.includes("Available in")) {
-            const qualitiesInfo = pageDescription.substring(pageDescription.indexOf("Available in"));
-            description = `${description}. ${qualitiesInfo}`;
+
+        if (!description) {
+            description = "No description available.";
         }
 
         const status = 1;
@@ -362,7 +364,8 @@ class DefaultExtension extends MProvider {
             state: 0,
             values: [
                 { type_name: "SelectOption", name: "Any Category", value: "" },
-                { type_name: "SelectOption", name: "All", value: "all" }, // Added 'All' as per your request
+                { type_name: "SelectOption", name: "All", value: "all" },
+                { type_name: "SelectOption", name: "ABS", value: "cat/abs" }, // Added ABS here
                 { type_name: "SelectOption", name: "4K Ultra HD", value: "cat/4k-porn" },
                 { type_name: "SelectOption", name: "60 FPS", value: "cat/60fps" },
                 { type_name: "SelectOption", name: "Amateur", value: "cat/amateur" },
@@ -404,7 +407,7 @@ class DefaultExtension extends MProvider {
                 { type_name: "SelectOption", name: "Interracial", value: "cat/interracial" },
                 { type_name: "SelectOption", name: "Japanese", value: "cat/japanese" },
                 { type_name: "SelectOption", name: "Latina", value: "cat/latina" },
-                { type_name: "SelectOption", name: "Lesbian", value: "cat/lesbians" }, // Note: value is 'lesbians'
+                { type_name: "SelectOption", name: "Lesbian", value: "cat/lesbians" },
                 { type_name: "SelectOption", name: "Lingerie", value: "cat/lingerie" },
                 { type_name: "SelectOption", name: "Massage", value: "cat/massage" },
                 { type_name: "SelectOption", name: "Masturbation", value: "cat/masturbation" },
@@ -413,7 +416,7 @@ class DefaultExtension extends MProvider {
                 { type_name: "SelectOption", name: "Nurses", value: "cat/nurse" },
                 { type_name: "SelectOption", name: "Office", value: "cat/office" },
                 { type_name: "SelectOption", name: "Older Men", value: "cat/old-man" },
-                { type_name: "SelectOption", name: "Orgy", value: "cat/orgy" },
+                { type: "SelectOption", name: "Orgy", value: "cat/orgy" },
                 { type_name: "SelectOption", name: "Outdoor", value: "cat/outdoor" },
                 { type_name: "SelectOption", name: "Petite", value: "cat/petite" },
                 { type_name: "SelectOption", name: "Pornstar", value: "cat/pornstar" },
@@ -427,7 +430,7 @@ class DefaultExtension extends MProvider {
                 { type_name: "SelectOption", name: "Striptease", value: "cat/striptease" },
                 { type_name: "SelectOption", name: "Students", value: "cat/students" },
                 { type_name: "SelectOption", name: "Swinger", value: "cat/swingers" },
-                { type_name: "SelectOption", name: "Teen", value: "cat/teens" }, // Note: value is 'teens'
+                { type_name: "SelectOption", name: "Teen", value: "cat/teens" },
                 { type_name: "SelectOption", name: "Threesome", value: "cat/threesome" },
                 { type_name: "SelectOption", name: "Toys", value: "cat/toys" },
                 { type_name: "SelectOption", name: "Uncategorized", value: "cat/uncategorized" },
