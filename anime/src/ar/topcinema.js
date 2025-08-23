@@ -10,7 +10,6 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
-
 class DefaultExtension extends MProvider {
     constructor() {
         super();
