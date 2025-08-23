@@ -43,6 +43,17 @@ class DefaultExtension extends MProvider {
         return -1;
     }
 
+    // Helper for parsing stream quality strings like "1080p (AV1)" or "720p (h264)"
+    _parseStreamQuality(qualityString) {
+        const resMatch = qualityString.match(/(\d{3,4})[pP]/); // Matches "1080p", "720p", "1440p", "2160p"
+        const codecMatch = qualityString.match(/\(([^)]+)\)/); // Captures content inside parentheses
+
+        const resolution = resMatch ? resMatch[1] : null; // e.g., "1080"
+        const codec = codecMatch ? codecMatch[1].toLowerCase() : null; // e.g., "av1"
+
+        return { resolution, codec };
+    }
+
     _toMedia(item) {
         const linkElement = item.selectFirst("div.mbcontent a");
         const link = this.getBaseUrl() + (linkElement?.getHref || "/");
@@ -202,7 +213,7 @@ class DefaultExtension extends MProvider {
     }
 
     async getVideoList(url) {
-        const streams = [];
+        let streams = [];
 
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
@@ -255,7 +266,7 @@ class DefaultExtension extends MProvider {
                 if (qualityMatch && qualityMatch[1]) {
                     const parts = qualityMatch[1].split(',').map(p => p.trim());
                     quality = parts[0] || "Unknown";
-                    codec = parts[1] || "";
+                    codec = parts[1] ? parts[1].toLowerCase() : "";
                 }
 
                 let finalQuality = quality;
@@ -272,8 +283,39 @@ class DefaultExtension extends MProvider {
             }
         }
 
-
+        // Sort all extracted streams by quality (highest resolution first)
+        // This ensures the quality selection list is ordered correctly
         streams.sort((a, b) => this.getQualityIndex(b.quality) - this.getQualityIndex(a.quality));
+
+        const preferredQualityValue = this.getPreference("preferred_quality");
+
+        // If a specific preference is set and it's not "auto"
+        if (preferredQualityValue !== "auto" && streams.length > 0) {
+            const [prefResRaw, prefCodec] = preferredQualityValue.split('_'); // e.g., ["1080", "av1"]
+            const prefResNum = parseInt(prefResRaw);
+
+            let preferredStreamIndex = -1;
+
+            // First, try to find an exact match (resolution AND codec)
+            preferredStreamIndex = streams.findIndex(stream => {
+                const { resolution, codec } = this._parseStreamQuality(stream.quality);
+                return resolution && parseInt(resolution) === prefResNum && codec === prefCodec;
+            });
+
+            // If no exact match, try to find a match by resolution only (any codec)
+            if (preferredStreamIndex === -1) {
+                preferredStreamIndex = streams.findIndex(stream => {
+                    const { resolution } = this._parseStreamQuality(stream.quality);
+                    return resolution && parseInt(resolution) === prefResNum;
+                });
+            }
+
+            // If a preferred stream was found, move it to the beginning of the array
+            if (preferredStreamIndex !== -1) {
+                const preferredStream = streams.splice(preferredStreamIndex, 1)[0];
+                streams.unshift(preferredStream); // Add to the front
+            }
+        }
 
         return streams;
     }
