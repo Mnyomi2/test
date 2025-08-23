@@ -1,13 +1,14 @@
 const mangayomiSources = [{
     "name": "FullPorner",
-    "id": 69032189045,
-    "baseUrl": "https://web6.topcinema.cam",
+    "id": 690851324,
     "lang": "en",
+    "baseUrl": "https://fullporner.com",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=fullporner.com",
     "typeSource": "single",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://fullporner.com",
     "itemType": 1,
-    "version": "1.0.",
-    "pkgPath": "anime/src/en/fullporner.js",
+    "isNsfw": true,
+    "version": "1.0.0",
+    "pkgPath": "anime/src/en/fullporner.js"
 }];
 
 class DefaultExtension extends MProvider {
@@ -16,130 +17,96 @@ class DefaultExtension extends MProvider {
         this.client = new Client();
     }
 
-    // A helper to parse a list of items from a page
-    async _parsePage(url) {
-        const res = await this.client.get(url);
-        const doc = new Document(res.body);
-
-        const list = [];
-        const items = doc.select("div.video-block div.video-card");
-        for (const item of items) {
-            const parsed = this._parseItem(item);
-            if (parsed) {
-                list.push(parsed);
-            }
-        }
-
-        const hasNextPage = doc.selectFirst("a.page-link[rel=next]") != null;
-        return { list, hasNextPage };
-    }
-
-    // A helper to parse a single item element
-    _parseItem(element) {
-        const title = element.selectFirst("div.video-title a")?.text;
-        const href = element.selectFirst("div.video-title a")?.getHref;
-        let imageUrl = element.selectFirst("div.video-card-image a img")?.attr("data-src");
-
-        if (!title || !href) {
-            return null;
-        }
-
-        if (imageUrl && !imageUrl.startsWith("http")) {
-            imageUrl = new URL(imageUrl, this.source.baseUrl).href;
-        }
-
+    getHeaders() {
         return {
-            name: title.trim(),
-            link: href,
-            imageUrl: imageUrl
+            "Referer": this.source.baseUrl,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
         };
     }
 
-    async getPopular(page) {
-        // The CS3 code's first entry is "Featured" which points to /home/
-        const url = `${this.source.baseUrl}/home/${page}`;
-        return this._parsePage(url);
+    // Helper function to parse a single video item from a list page
+    parseItem(element) {
+        const linkElement = element.selectFirst("div.video-card-body div.video-title a");
+        const name = linkElement.text;
+        const link = linkElement.getHref;
+        const imageUrl = element.selectFirst("div.video-card-image a img").attr("data-src");
+        return { name, link, imageUrl };
     }
 
-    async getLatestUpdates(page) {
-        // Using the website's "Newest" section for latest updates
-        const url = `${this.source.baseUrl}/newest/${page}`;
-        return this._parsePage(url);
-    }
-
-    async search(query, page, filters) {
-        const url = `${this.source.baseUrl}/search?q=${query.replace(/ /g, "+")}&p=${page}`;
-        return this._parsePage(url);
-    }
-
-    // Helper to determine video qualities from a number/binary string
-    btq(f) {
-        let num;
-        // The source can pass a decimal integer or a binary string
-        if (typeof f === 'string') {
-             // If it contains non-digit characters, assume binary, otherwise decimal.
-            if (/[^0-9]/.test(f)) {
-                num = parseInt(f, 2); 
-            } else {
-                num = parseInt(f, 10);
-            }
-        } else {
-            num = f;
-        }
-
+    // Helper function to determine available video qualities from a numeric code
+    btq(q) {
+        const num = parseInt(q, 10);
         const result = [];
         if ((num & 1) !== 0) result.push("360");
         if ((num & 2) !== 0) result.push("480");
         if ((num & 4) !== 0) result.push("720");
         if ((num & 8) !== 0) result.push("1080");
-        return result;
+        return result.reverse(); // Higher quality first
     }
 
-    // Helper to construct poster URL
-    getPoster(id, hasQuality) {
-        if (!id) return null;
-        if (hasQuality) {
-            return `https://xiaoshenke.net/vid/${id}/720/i`;
-        } else {
-            const path = `${Math.floor(parseInt(id) / 1000)}000`;
-            return `https://imgx.xiaoshenke.net/posterz/contents/videos_screenshots/${path}/${id}/preview_720p.mp4.jpg`;
-        }
+    async getPopular(page) {
+        const url = `${this.source.baseUrl}/home/${page}`;
+        const res = await this.client.get(url, this.getHeaders());
+        const doc = new Document(res.body);
+        const items = doc.select("div.video-block div.video-card");
+        const list = items.map(it => this.parseItem(it));
+        return { list, hasNextPage: list.length > 0 };
+    }
+
+    async getLatestUpdates(page) {
+        // Using "Amateur" category for latest updates
+        const url = `${this.source.baseUrl}/category/amateur/${page}`;
+        const res = await this.client.get(url, this.getHeaders());
+        const doc = new Document(res.body);
+        const items = doc.select("div.video-block div.video-card");
+        const list = items.map(it => this.parseItem(it));
+        return { list, hasNextPage: list.length > 0 };
+    }
+
+    async search(query, page, filters) {
+        const url = `${this.source.baseUrl}/search?q=${encodeURIComponent(query)}&p=${page}`;
+        const res = await this.client.get(url, this.getHeaders());
+        const doc = new Document(res.body);
+        const items = doc.select("div.video-block div.video-card");
+        const list = items.map(it => this.parseItem(it));
+        const hasNextPage = doc.selectFirst("ul.pagination li.page-item a[rel=next]") != null;
+        return { list, hasNextPage };
     }
 
     async getDetail(url) {
-        const res = await this.client.get(url);
+        const res = await this.client.get(url, this.getHeaders());
         const doc = new Document(res.body);
 
-        const name = doc.selectFirst("div.single-video-title h2")?.text?.trim() || "Unknown Title";
-        const description = name; // No separate description, use title
-        const genre = doc.select("p.tag-link span a").map(it => it.text.replace("#", ""));
-        
+        const name = doc.selectFirst("div.single-video-title h2").text.trim();
+        const genre = doc.select("div.single-video-title p.tag-link span a").map(it => it.text.replace("#", ""));
+        const description = name; // Source uses title as description
+        const imageUrl = doc.selectFirst("meta[property='og:image']")?.attr("content");
+
         const iframeUrl = doc.selectFirst("div.single-video iframe")?.attr("src");
         if (!iframeUrl) {
-            throw new Error("Video iframe not found.");
+            throw new Error("Video player not found.");
         }
 
-        const iframeRes = await this.client.get(iframeUrl);
-        const iframeHtml = iframeRes.body;
+        const iframeRes = await this.client.get(iframeUrl, this.getHeaders());
+        const iframeBody = iframeRes.body;
 
-        const idMatch = iframeHtml.match(/var id = "(.+?)"/);
-        const videoID = idMatch ? idMatch[1].split('').reverse().join('') : null;
+        const videoIdMatch = iframeBody.match(/var id = "(.+)"/);
+        if (!videoIdMatch || !videoIdMatch[1]) {
+            throw new Error("Video ID not found in player.");
+        }
+        const videoID = videoIdMatch[1].split('').reverse().join('');
 
-        const qMatch = iframeUrl.match(/\/(\d+|\w+)$/);
-        const q = qMatch ? qMatch[1] : 0;
-        
+        const q = new URL(iframeUrl).pathname.split('/').pop();
         const qualities = this.btq(q);
-        const imageUrl = this.getPoster(videoID, qualities.length > 0);
 
-        // Pass data to getVideoList via the chapter URL
-        const linkData = {
+        const chapterUrlData = JSON.stringify({
             qualities: qualities,
             id: videoID
-        };
+        });
 
         const chapters = [{
             name: "Movie",
-            url: JSON.stringify(linkData),
+            url: chapterUrlData,
         }];
 
         return {
@@ -155,21 +122,17 @@ class DefaultExtension extends MProvider {
 
     async getVideoList(url) {
         const data = JSON.parse(url);
-        if (!data.id || !data.qualities) {
-            return [];
-        }
+        const videoID = data.id;
+        const qualities = data.qualities;
+        const prefix = "https://xiaoshenke.net/vid";
 
-        const videos = [];
-        for (const quality of data.qualities) {
-            const videoUrl = `https://xiaoshenke.net/vid/${data.id}/${quality}`;
-            videos.push({
-                url: videoUrl,
-                originalUrl: videoUrl,
-                quality: `${quality}p`,
-            });
-        }
+        const videos = qualities.map(quality => ({
+            url: `${prefix}/${videoID}/${quality}`,
+            originalUrl: `${prefix}/${videoID}/${quality}`,
+            quality: `${quality}p`,
+            headers: this.getHeaders()
+        }));
         
-        // Reverse to show higher qualities first
-        return videos.reverse();
+        return videos;
     }
 }
