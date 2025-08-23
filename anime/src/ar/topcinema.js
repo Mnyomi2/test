@@ -161,11 +161,15 @@ class DefaultExtension extends MProvider {
                 const sizeText = linkElement.selectFirst("span.small.text-muted")?.text.trim() || "";
                 let quality = sizeText ? `${qualityText} (${sizeText})` : qualityText;
 
-                const finalPageDoc = await this.request(absoluteUrl, { "Referer": vidtubeQualityPageUrl }).then(res => new Document(res.body));
+                // **FIX**: Use a WebView to load the page and execute JavaScript.
+                const res = await this.client.get(absoluteUrl, {
+                    headers: { "Referer": vidtubeQualityPageUrl },
+                    webView: true
+                });
+                const finalPageDoc = new Document(res.body);
                 const finalVideoUrl = finalPageDoc.selectFirst("a.btn.btn-gradient.submit-btn")?.getHref;
                 
                 if (finalVideoUrl) {
-                    // **FIX**: Create a full headers object that mimics a real browser request.
                     const browserHeaders = {
                         "Referer": vidtubeOrigin + "/",
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0",
@@ -174,8 +178,7 @@ class DefaultExtension extends MProvider {
                         "Upgrade-Insecure-Requests": "1",
                         "Sec-Fetch-Dest": "document",
                         "Sec-Fetch-Mode": "navigate",
-                        "Sec-Fetch-Site": "cross-site",
-                        "Sec-Fetch-User": "?1"
+                        "Sec-Fetch-Site": "cross-site"
                     };
                     const videoUrlWithHeaders = `${finalVideoUrl}|headers=${encodeURIComponent(JSON.stringify(browserHeaders))}`;
                     
