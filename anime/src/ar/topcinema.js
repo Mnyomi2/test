@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "typeSource": "single",
     "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://web6.topcinema.cam",
     "itemType": 1,
-    "version": "1.0.2", // Incremented version for the final fix
+    "version": "1.0.2",
     "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
@@ -165,18 +165,19 @@ class DefaultExtension extends MProvider {
                 const finalVideoUrl = finalPageDoc.selectFirst("a.btn.btn-gradient.submit-btn")?.getHref;
                 
                 if (finalVideoUrl) {
-                    // **FIX**: Replicate the full browser headers for the video request.
-                    const headers = {
+                    // **FIX**: Create a full headers object that mimics a real browser request.
+                    const browserHeaders = {
+                        "Referer": vidtubeOrigin + "/",
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0",
                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                         "Accept-Language": "en-US,en;q=0.5",
-                        "Referer": vidtubeOrigin + "/",
+                        "Upgrade-Insecure-Requests": "1",
                         "Sec-Fetch-Dest": "document",
                         "Sec-Fetch-Mode": "navigate",
                         "Sec-Fetch-Site": "cross-site",
-                        "Upgrade-Insecure-Requests": "1"
+                        "Sec-Fetch-User": "?1"
                     };
-                    const videoUrlWithHeaders = `${finalVideoUrl}|headers=${encodeURIComponent(JSON.stringify(headers))}`;
+                    const videoUrlWithHeaders = `${finalVideoUrl}|headers=${encodeURIComponent(JSON.stringify(browserHeaders))}`;
                     
                     allStreams.push({ url: videoUrlWithHeaders, originalUrl: finalVideoUrl, quality: quality });
                 }
