@@ -78,6 +78,33 @@ class DefaultExtension extends MProvider {
         return `${basePath}${path}`;
     }
 
+    /**
+     * Helper function to extract the origin from a URL string without using the URL object.
+     * @param {string} url The full URL string.
+     * @returns {string} The origin (e.g., "https://example.com").
+     */
+    _getOrigin(url) {
+        const match = url.match(/^(https?:\/\/[^/]+)/);
+        return match ? match[1] : '';
+    }
+
+    /**
+     * Helper to get numeric resolution from quality string (e.g., "1080p FHD" -> 1080, "Original" -> 9999)
+     * Assigns a high value to "Original" to prioritize it in sorting if no explicit resolution.
+     * @param {string} qualityLabel The simplified quality label (e.g., "Original", "1080p FHD")
+     * @returns {number} The numeric resolution (e.g., 1080) or a high value for "Original", or 0 for unknown.
+     */
+    _getResolution(qualityLabel) {
+        const match = qualityLabel.match(/(\d{3,4})p/i); // Matches "1080p", "720p", "480p"
+        if (match) {
+            return parseInt(match[1], 10);
+        }
+        if (qualityLabel.toLowerCase().includes("original")) {
+            return 9999; // Assume original is highest quality for sorting
+        }
+        return 0; // Default for unknown/unparsed resolutions
+    }
+
 
     /**
      * وظيفة شاملة لتنظيف وتنسيق عناوين الأفلام والمسلسلات.
@@ -286,7 +313,6 @@ class DefaultExtension extends MProvider {
         const streams = [];
 
         // 1. Construct the download page URL from the original episode URL
-        // Example: https://web6.topcinema.cam/.../episode-slug/ -> https://web6.topcinema.cam/.../episode-slug/download/
         const downloadPagePath = url.replace(this.source.baseUrl, '') + (url.endsWith('/') ? 'download/' : '/download/');
         
         // Fetch the Topcinema download page
@@ -303,13 +329,10 @@ class DefaultExtension extends MProvider {
         }
 
         const vidtubeQualityPageUrl = vidtubeLinkElement.getHref; // e.g., https://vidtube.pro/d/bprhyyg93roo.html
-        
-        // FIX: Replace new URL().origin with string manipulation for compatibility
-        const vidtubeOriginMatch = vidtubeQualityPageUrl.match(/^(https?:\/\/[^/]+)/);
-        const vidtubeOrigin = vidtubeOriginMatch ? vidtubeOriginMatch[1] : '';
+        const vidtubeOrigin = this._getOrigin(vidtubeQualityPageUrl); // e.g., https://vidtube.pro
 
         if (!vidtubeOrigin) {
-            console.error("Could not extract origin from VidTube URL: " + vidtubeQualityPageUrl);
+            console.error("Could not extract VidTube origin from URL: " + vidtubeQualityPageUrl);
             return streams;
         }
 
@@ -329,43 +352,53 @@ class DefaultExtension extends MProvider {
             const qualityTextElement = linkElement.selectFirst("b.text-primary.flex-grow-1.text-start.large");
             const sizeTextElement = linkElement.selectFirst("span.small.text-muted");
             
-            let quality = qualityTextElement?.text.trim() || "Unknown Quality";
-            let size = sizeTextElement?.text.trim() || "";
+            let qualityLabel = qualityTextElement?.text.trim() || "Unknown Quality"; // e.g., "Original", "1080p FHD"
+            let sizeInfo = sizeTextElement?.text.trim() || ""; // e.g., "1920x800, 619.8 MB"
 
-            // Add size to quality for better identification, if available
-            if (size) {
-                quality += ` (${size})`;
+            let fullQualityString = qualityLabel;
+            if (sizeInfo) {
+                fullQualityString += ` (${sizeInfo})`;
             }
             
             if (absoluteQualityUrl) {
-                qualities.push({ url: absoluteQualityUrl, quality: quality });
+                qualities.push({ url: absoluteQualityUrl, quality: fullQualityString, label: qualityLabel });
             }
         }
-
+        
         // 5. Apply preferred quality filter and sorting
-        const preferredQualitySetting = this.getPreference("preferred_quality");
+        const preferredQualitySetting = this.getPreference("preferred_quality"); // e.g., "Auto", "original", "1080p"
         let relevantQualities = [...qualities]; // Start with all qualities
 
         if (preferredQualitySetting && preferredQualitySetting !== "Auto") {
             const normalizedPreferred = preferredQualitySetting.toLowerCase();
-            const matchingQualities = qualities.filter(q => 
-                q.quality.toLowerCase().includes(normalizedPreferred)
-            );
+
+            const matchingQualities = qualities.filter(q => {
+                // Match against the simplified label for preference
+                const qLabelLower = q.label.toLowerCase(); 
+                // Checks if the quality label includes the preferred setting (e.g., "1080p FHD" includes "1080p")
+                return qLabelLower.includes(normalizedPreferred);
+            });
             
             if (matchingQualities.length > 0) {
                 relevantQualities = matchingQualities;
             } else {
-                console.warn(`Preferred quality "${preferredQualitySetting}" not found among available streams, using all available. Fallback to all qualities.`);
+                console.warn(`Preferred quality "${preferredQualitySetting}" not found among available streams, falling back to all available qualities.`);
+                // If no specific match, relevantQualities remains the full list due to initial assignment
             }
         }
         
-        // Sort qualities from highest to lowest resolution (numeric value)
+        // Sort qualities (highest resolution first, "Original" if prioritized)
         relevantQualities.sort((a, b) => {
-            const numA = parseInt(a.quality.match(/\d+/)?.[0] || '0');
-            const numB = parseInt(b.quality.match(/\d+/)?.[0] || '0');
-            return numB - numA; // Descending order
+            const resA = this._getResolution(a.label); // Use label for resolution parsing
+            const resB = this._getResolution(b.label);
+            
+            // Primary sort by resolution (descending)
+            if (resA !== resB) {
+                return resB - resA;
+            }
+            // Secondary sort for stable order if resolutions are the same.
+            return 0; 
         });
-
 
         // 6. Fetch the final direct video URL for each selected quality
         for (const qualityEntry of relevantQualities) {
@@ -382,21 +415,20 @@ class DefaultExtension extends MProvider {
                     streams.push({
                         url: finalVideoUrl,
                         originalUrl: finalVideoUrl,
-                        quality: qualityEntry.quality, // Use the full quality string (e.g., "1080p FHD (1920x800, 619.8 MB)")
+                        quality: qualityEntry.quality, // Use the full string including size
                         headers: {
                             "Referer": vidtubeOrigin, // Crucial for playing the video stream
                             ...this._defaultHeaders // Merge other default headers like User-Agent
                         }
                     });
+                } else {
+                    console.warn(`No direct download link found on ${qualityEntry.url} for quality: ${qualityEntry.quality}`);
                 }
             } catch (error) {
                 console.error(`Error fetching final video for quality ${qualityEntry.quality} from ${qualityEntry.url}:`, error, error.stack);
             }
         }
         
-        // No subtitles mentioned or extractable from this flow based on the provided HTML examples.
-        // If subtitles are present in the final HTML page for the video, add logic here.
-
         return streams;
     }
 	
@@ -467,9 +499,9 @@ class DefaultExtension extends MProvider {
             listPreference: {
                 title: "الجودة المفضلة",
                 summary: "اختر الجودة المفضلة لديك",
-                value: "720", 
-                entries: ["1080p FHD", "720p HD", "480p SD", "Auto"], 
-                entryValues: ["1080p", "720", "480", "Auto"], 
+                value: "Auto", // Default to Auto for better user experience
+                entries: ["Auto", "Original", "1080p FHD", "720p HD", "480p SD"], 
+                entryValues: ["Auto", "original", "1080p", "720", "480"], // Use simplified entry values for matching
             }
         }, {
             key: "preferred_download_servers",
