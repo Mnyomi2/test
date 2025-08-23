@@ -1,14 +1,13 @@
 const mangayomiSources = [{
     "name": "FullPorner",
     "id": 69032189045,
+    "baseUrl": "https://web6.topcinema.cam",
     "lang": "en",
-    "baseUrl": "https://fullporner.com",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=fullporner.com",
     "typeSource": "single",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://fullporner.com",
     "itemType": 1,
-    "isNsfw": true,
-    "version": "1.0.0",
-    "pkgPath": "nsfw/src/en/fullporner.js"
+    "version": "1.0.",
+    "pkgPath": "anime/src/en/fullporner.js",
 }];
 
 class DefaultExtension extends MProvider {
