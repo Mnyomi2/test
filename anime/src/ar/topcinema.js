@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "typeSource": "single",
     "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://web6.topcinema.cam",
     "itemType": 1,
-    "version": "1.0.2", // Incremented version
+    "version": "1.0.2", // Incremented version for the final fix
     "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
@@ -163,13 +163,26 @@ class DefaultExtension extends MProvider {
 
                 const finalPageDoc = await this.request(absoluteUrl, { "Referer": vidtubeQualityPageUrl }).then(res => new Document(res.body));
                 const finalVideoUrl = finalPageDoc.selectFirst("a.btn.btn-gradient.submit-btn")?.getHref;
+                
                 if (finalVideoUrl) {
-                    allStreams.push({ url: finalVideoUrl, originalUrl: finalVideoUrl, quality: quality, headers: { "Referer": vidtubeOrigin } });
+                    // **FIX**: Replicate the full browser headers for the video request.
+                    const headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "en-US,en;q=0.5",
+                        "Referer": vidtubeOrigin + "/",
+                        "Sec-Fetch-Dest": "document",
+                        "Sec-Fetch-Mode": "navigate",
+                        "Sec-Fetch-Site": "cross-site",
+                        "Upgrade-Insecure-Requests": "1"
+                    };
+                    const videoUrlWithHeaders = `${finalVideoUrl}|headers=${encodeURIComponent(JSON.stringify(headers))}`;
+                    
+                    allStreams.push({ url: videoUrlWithHeaders, originalUrl: finalVideoUrl, quality: quality });
                 }
             } catch (e) {}
         }
 
-        // Sort all streams with "Original" as highest, then numerically descending
         allStreams.sort((a, b) => {
             const getQualityScore = (quality) => {
                 if (quality.toLowerCase().includes('original')) return 9999;
@@ -198,17 +211,17 @@ class DefaultExtension extends MProvider {
         const preferred = [];
         const other = [];
 
-        // Separate streams into preferred and other lists
         allStreams.forEach(stream => {
-            const streamQualityLower = stream.quality.toLowerCase();
-            if (targetKeywords.some(keyword => streamQualityLower.includes(keyword))) {
+            const isPreferred = targetKeywords.some(keyword => 
+                new RegExp(`\\b${keyword}\\b`, 'i').test(stream.quality)
+            );
+            if (isPreferred) {
                 preferred.push(stream);
             } else {
                 other.push(stream);
             }
         });
         
-        // Return the full list, with preferred qualities at the top
         return [...preferred, ...other];
     }
 
