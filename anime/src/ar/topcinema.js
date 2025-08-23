@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "typeSource": "single",
     "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://web6.topcinema.cam",
     "itemType": 1,
-    "version": "1.0.3",
+    "version": "1.0.2",
     "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
@@ -166,10 +166,9 @@ class DefaultExtension extends MProvider {
                 if (finalVideoUrl) {
                     allStreams.push({ url: finalVideoUrl, originalUrl: finalVideoUrl, quality: quality, headers: { "Referer": vidtubeOrigin } });
                 }
-            } catch (e) { console.error("Error processing quality link:", e); }
+            } catch (e) {}
         }
 
-        // Sort all streams by quality (best to worst) before any filtering.
         allStreams.sort((a, b) => {
             const numA = parseInt(a.quality.match(/\d+/)?.[0] || '0');
             const numB = parseInt(b.quality.match(/\d+/)?.[0] || '0');
@@ -199,8 +198,6 @@ class DefaultExtension extends MProvider {
             return filteredStreams;
         }
 
-        // Fallback: If no streams match the preferred quality, return all available streams.
-        console.warn(`Preferred quality "${preferredQuality}" not found. Returning all available streams.`);
         return allStreams;
     }
 
@@ -215,9 +212,9 @@ class DefaultExtension extends MProvider {
             listPreference: {
                 title: "الجودة المفضلة",
                 summary: "اختر الجودة المفضلة للفيديو",
-                value: "Auto", // Default to Auto for best results
+                valueIndex: 0,
                 entries: ["تلقائي (الأفضل)", "1080p FHD", "720p HD", "480p SD", "240p SD"],
-                entryValues: ["Auto", "1080p", "720p", "480p", "240p"],
+                entryValues: ["Auto", "1080p", "720p", "480p", "240p"]
             }
         }];
     }
