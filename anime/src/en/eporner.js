@@ -35,6 +35,7 @@ class DefaultExtension extends MProvider {
     }
 
     getQualityIndex(str) {
+        // This function extracts the numeric part of the quality string for sorting.
         const match = str.match(/(\d{3,4})[pP]/);
         if (match && match[1]) {
             return parseInt(match[1]);
@@ -46,9 +47,10 @@ class DefaultExtension extends MProvider {
         const linkElement = item.selectFirst("div.mbcontent a");
         const link = this.getBaseUrl() + (linkElement?.getHref || "/");
 
-        const name = item.selectFirst("p.mbtit a")?.text?.trim() || "Unknown Title";
+        const imageElement = item.selectFirst("img");
+        const imageUrl = imageElement?.getSrc || imageElement?.attr("data-src") || "";
 
-        const imageUrl = item.selectFirst("img")?.getSrc || item.selectFirst("img")?.attr("data-src") || "";
+        const name = imageElement?.attr("alt")?.trim() || "Unknown Title";
 
         return {
             name,
@@ -63,7 +65,12 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
 
         const list = [];
-        const items = doc.select("div.mb");
+        const vidResultsContainer = doc.selectFirst("div#vidresults");
+        if (!vidResultsContainer) {
+            console.error("Could not find #vidresults container for popular videos.");
+            return { list: [], hasNextPage: false };
+        }
+        const items = vidResultsContainer.select("div.mbimg");
 
         for (const item of items) {
             list.push(this._toMedia(item));
@@ -82,7 +89,12 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
 
         const list = [];
-        const items = doc.select("div.mb");
+        const vidResultsContainer = doc.selectFirst("div#vidresults");
+        if (!vidResultsContainer) {
+            console.error("Could not find #vidresults container for latest updates.");
+            return { list: [], hasNextPage: false };
+        }
+        const items = vidResultsContainer.select("div.mbimg");
 
         for (const item of items) {
             list.push(this._toMedia(item));
@@ -102,11 +114,10 @@ class DefaultExtension extends MProvider {
             if (filter.type_name === "SelectFilter" && filter.name === "Sort By") {
                 const selectedValue = filter.values[filter.state].value;
                 if (selectedValue !== "search") {
-                    url = `${this.getBaseUrl()}/${selectedValue}/${encodeURIComponent(query)}/${page}/`;
                     if(selectedValue.startsWith("cat/")) {
                         url = `${this.getBaseUrl()}/${selectedValue}/search/${encodeURIComponent(query)}/${page}/`;
                     } else {
-                         url = `${this.getBaseUrl()}/search/${encodeURIComponent(query)}/${selectedValue}/${page}/`;
+                        url = `${this.getBaseUrl()}/search/${encodeURIComponent(query)}/${selectedValue}/${page}/`;
                     }
                 }
             } else if (filter.type_name === "GroupFilter" && filter.name === "Categories") {
@@ -121,7 +132,12 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
 
         const list = [];
-        const items = doc.select("div.mb");
+        const vidResultsContainer = doc.selectFirst("div#vidresults");
+        if (!vidResultsContainer) {
+            console.error("Could not find #vidresults container for search results.");
+            return { list: [], hasNextPage: false };
+        }
+        const items = vidResultsContainer.select("div.mbimg");
 
         for (const item of items) {
             list.push(this._toMedia(item));
@@ -159,8 +175,8 @@ class DefaultExtension extends MProvider {
         const status = 1;
 
         const genre = [];
-        const tagElements = doc.select("div.info-row a[href*=/cat/]");
-        for (const element of tagElements) {
+        const genreElements = doc.select("div#video-info-tags ul li.vit-category a");
+        for (const element of genreElements) {
             const genreName = element.text?.trim();
             if (genreName) {
                 genre.push(genreName);
@@ -188,39 +204,74 @@ class DefaultExtension extends MProvider {
     async getVideoList(url) {
         const streams = [];
 
-        const videoIdMatch = url.match(/\/video\/([a-zA-Z0-9]+)\//);
-        if (!videoIdMatch || !videoIdMatch[1]) {
-            console.error("Could not extract video ID from URL:", url);
-            return [];
-        }
-        const videoId = videoIdMatch[1];
+        const res = await this.client.get(url, this.getHeaders(url));
+        const doc = new Document(res.body);
 
-        const xhrUrl = `${this.getBaseUrl()}/xhr/video/${videoId}`;
-        const res = await this.client.get(xhrUrl, this.getHeaders(xhrUrl));
+        const downloadDiv = doc.selectFirst("div#downloaddiv");
+        if (!downloadDiv) {
+            const videoIdMatch = url.match(/\/video\/([a-zA-Z0-9]+)\//);
+            if (!videoIdMatch || !videoIdMatch[1]) {
+                console.error("Could not extract video ID from URL for fallback:", url);
+                return [];
+            }
+            const videoId = videoIdMatch[1];
+            const xhrUrl = `${this.getBaseUrl()}/xhr/video/${videoId}`;
+            const xhrRes = await this.client.get(xhrUrl, this.getHeaders(xhrUrl));
 
-        try {
-            const json = JSON.parse(res.body);
-            const sources = json.sources;
-            if (sources && sources.mp4) {
-                const mp4Sources = sources.mp4;
-                for (const qualityKey in mp4Sources) {
-                    if (mp4Sources.hasOwnProperty(qualityKey)) {
-                        const sourceObject = mp4Sources[qualityKey];
-                        const src = sourceObject.src;
-                        const labelShort = sourceObject.labelShort || qualityKey;
+            try {
+                const json = JSON.parse(xhrRes.body);
+                const sources = json.sources;
+                if (sources && sources.mp4) {
+                    const mp4Sources = sources.mp4;
+                    for (const qualityKey in mp4Sources) {
+                        if (mp4Sources.hasOwnProperty(qualityKey)) {
+                            const sourceObject = mp4Sources[qualityKey];
+                            const src = sourceObject.src;
+                            const labelShort = sourceObject.labelShort || qualityKey;
 
-                        streams.push({
-                            url: src,
-                            originalUrl: src,
-                            quality: labelShort,
-                            headers: this.getHeaders(src)
-                        });
+                            streams.push({
+                                url: src,
+                                originalUrl: src,
+                                quality: labelShort,
+                                headers: this.getHeaders(src)
+                            });
+                        }
                     }
                 }
+            } catch (e) {
+                console.error("Failed to parse video sources JSON via fallback or extract sources:", e);
             }
-        } catch (e) {
-            console.error("Failed to parse video sources JSON or extract sources:", e);
+        } else {
+            const downloadLinks = downloadDiv.select("a[href*='/dload/']");
+
+            for (const linkElement of downloadLinks) {
+                const videoUrl = this.getBaseUrl() + linkElement.getHref;
+                const fullQualityText = linkElement.text?.trim() || "";
+
+                let quality = "Unknown";
+                let codec = "";
+                const qualityMatch = fullQualityText.match(/\(([^)]+)\)/);
+
+                if (qualityMatch && qualityMatch[1]) {
+                    const parts = qualityMatch[1].split(',').map(p => p.trim());
+                    quality = parts[0] || "Unknown";
+                    codec = parts[1] || "";
+                }
+
+                let finalQuality = quality;
+                if (codec) {
+                    finalQuality = `${quality} (${codec})`;
+                }
+
+                streams.push({
+                    url: videoUrl,
+                    originalUrl: videoUrl,
+                    quality: finalQuality,
+                    headers: this.getHeaders(videoUrl)
+                });
+            }
         }
+
 
         streams.sort((a, b) => this.getQualityIndex(b.quality) - this.getQualityIndex(a.quality));
 
@@ -307,8 +358,26 @@ class DefaultExtension extends MProvider {
                 title: "Preferred Video Quality",
                 summary: "Select the quality to be prioritized",
                 valueIndex: 0,
-                entries: ["Auto", "1080p", "720p", "480p", "360p", "240p"],
-                entryValues: ["auto", "1080", "720", "480", "360", "240"],
+                entries: [
+                    "Auto",
+                    "2160p (AV1)", "2160p (h264)",
+                    "1440p (AV1)", "1440p (h264)",
+                    "1080p (AV1)", "1080p (h264)",
+                    "720p (AV1)", "720p (h264)",
+                    "480p (AV1)", "480p (h264)",
+                    "360p (AV1)", "360p (h264)",
+                    "240p (AV1)", "240p (h264)"
+                ],
+                entryValues: [
+                    "auto",
+                    "2160_av1", "2160_h264",
+                    "1440_av1", "1440_h264",
+                    "1080_av1", "1080_h264",
+                    "720_av1", "720_h264",
+                    "480_av1", "480_h264",
+                    "360_av1", "360_h264",
+                    "240_av1", "240_h264"
+                ],
             }
         }, {
             key: "enable_vpn_warning",
