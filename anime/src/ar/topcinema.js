@@ -16,7 +16,6 @@ class DefaultExtension extends MProvider {
         this.client = new Client();
         this._allSources = mangayomiSources; 
         this.source.baseUrl = this.source.baseUrl.trim();
-        // Define a consistent User-Agent for all external requests
         this._defaultHeaders = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.75 Safari/537.36",
         };
@@ -26,36 +25,24 @@ class DefaultExtension extends MProvider {
         return new SharedPreferences().get(key);
     }
 
-    // Centralized request method for fetching a Document (HTML parsing)
     async requestDoc(path, headers = {}) {
         const url = this.source.baseUrl + path;
         const res = await this.request(url, headers);
         return new Document(res.body);
     }
 
-    // Centralized request method for raw HTTP response
     async request(url, headers = {}) {
         const requestHeaders = { ...this._defaultHeaders, ...headers };
         const res = await this.client.get(url, { headers: requestHeaders });
         return res;
     }
 
-    /**
-     * Helper function to resolve relative URLs.
-     * @param {string} path The potentially relative URL path.
-     * @param {string} baseUrl The base URL to resolve against.
-     * @returns {string} The resolved absolute URL.
-     */
     resolveRelativeUrl(path, baseUrl) {
         if (!path) return baseUrl;
-        if (path.startsWith('http://') || path.startsWith('https://')) {
-            return path;
-        }
+        if (path.startsWith('http://') || path.startsWith('https://')) return path;
         const baseOriginMatch = baseUrl.match(/^(https?:\/\/[^/]+)/);
         const baseOrigin = baseOriginMatch ? baseOriginMatch[1] : '';
-        if (path.startsWith('/')) {
-            return `${baseOrigin}${path}`;
-        }
+        if (path.startsWith('/')) return `${baseOrigin}${path}`;
         const lastSlashIndex = baseUrl.lastIndexOf('/');
         const basePath = (lastSlashIndex > (baseOrigin.length + 2)) ? baseUrl.substring(0, lastSlashIndex + 1) : `${baseOrigin}/`;
         return `${basePath}${path}`;
@@ -64,112 +51,74 @@ class DefaultExtension extends MProvider {
     _titleEdit(title) { 
         let editedTitle = title ? title.trim() : ""; 
         if (!editedTitle) return editedTitle;
-
-        const arabicSeasonMap = {
-            "الاول": "1", "الثاني": "2", "الثالث": "3", "الرابع": "4", "الخامس": "5",
-            "السادس": "6", "السابع": "7", "الثامن": "8", "التاسع": "9", "العاشر": "10",
-            "الحادي عشر": "11", "الثاني عشر": "12", "الثالث عشر": "13", "الرابع عشر": "14", "الخامس عشر": "15"
-        };
-        editedTitle = editedTitle.replace(/[\u2013\u2014\u2015\u2212]/g, '-');
-        editedTitle = editedTitle.replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s*\[.*?\]\s*/g, ' ');
+        const arabicSeasonMap = {"الاول": "1", "الثاني": "2", "الثالث": "3", "الرابع": "4", "الخامس": "5", "السادس": "6", "السابع": "7", "الثامن": "8", "التاسع": "9", "العاشر": "10"};
+        editedTitle = editedTitle.replace(/[\u2013\u2014\u2015\u2212]/g, '-').replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s*\[.*?\]\s*/g, ' ');
         let extractedYear = '';
-        editedTitle = editedTitle.replace(/\b(\d{4})\b/, (match, p1) => {
-            extractedYear = p1;
-            return ''; 
-        });
+        editedTitle = editedTitle.replace(/\b(\d{4})\b/, (match, p1) => { extractedYear = p1; return ''; });
         editedTitle = editedTitle.replace(/^(?:فيلم|عرض|مسلسل|برنامج|انمي)\s+/i, '');
         for (const key in arabicSeasonMap) {
-            const regex = new RegExp(`الموسم\\s*(?:ال)*${key}\\b`, 'gi'); 
-            editedTitle = editedTitle.replace(regex, `الموسم ${arabicSeasonMap[key]}`);
+            editedTitle = editedTitle.replace(new RegExp(`الموسم\\s*(?:ال)*${key}\\b`, 'gi'), `الموسم ${arabicSeasonMap[key]}`);
         }
-        editedTitle = editedTitle.replace(/الموسم\s*(\d+)/gi, 's$1');
-        editedTitle = editedTitle.replace(/الحلقة\s*(\d+)/gi, 'E$1');
-        editedTitle = editedTitle.replace(/\s+(?:مترجم|مترجمة|مدبلج|مدبلجة|اون لاين|اونلاين|كامل|بجودة عالية|جودة عالية|حصريا|مشاهدة)\s*$/gi, '');
-        editedTitle = editedTitle.replace(/\b(?:HD|4K|FHD|UHD|HDRip|BluRay|WEB-DL|720p|1080p)\b/gi, '');
+        editedTitle = editedTitle.replace(/الموسم\s*(\d+)/gi, 's$1').replace(/الحلقة\s*(\d+)/gi, 'E$1');
+        editedTitle = editedTitle.replace(/\s+(?:مترجم|مترجمة|مدبلج|مدبلجة|اون لاين|اونلاين|كامل|بجودة عالية|مشاهدة)\s*$/gi, '');
+        editedTitle = editedTitle.replace(/\b(?:HD|4K|FHD|UHD|BluRay|WEB-DL|720p|1080p)\b/gi, '');
         editedTitle = editedTitle.replace(/\s+/g, ' ');
-        if (extractedYear) {
-            editedTitle += ` (${extractedYear})`;
-        }
+        if (extractedYear) { editedTitle += ` (${extractedYear})`; }
         return editedTitle.trim();
     }
 
     async _processListingItems(doc) {
         const list = [];
         const items = doc.select("div.Block--Item, div.Small--Box");
-        for (const item of items) { 
+        for (const item of items) {
             const linkElement = item.selectFirst("a");
             if (!linkElement) continue;
-
             const link = linkElement.getHref;
             const rawTitle = linkElement.attr("title") || item.selectFirst("h3.title")?.text;
-            const name = this._titleEdit(rawTitle); 
+            const name = this._titleEdit(rawTitle);
             const imageUrl = item.selectFirst("img")?.attr("data-src");
-
             if (link.includes('/series/')) {
                 try {
-                    const seriesDetailPageDoc = await this.requestDoc(link.replace(this.source.baseUrl, ''));
-                    const seasonElements = seriesDetailPageDoc.select("section.allseasonss div.Small--Box.Season");
-
+                    const seriesDoc = await this.requestDoc(link.replace(this.source.baseUrl, ''));
+                    const seasonElements = seriesDoc.select("section.allseasonss div.Small--Box.Season a");
                     if (seasonElements.length > 0) {
-                        for (const seasonItem of seasonElements) {
-                            const seasonLinkElement = seasonItem.selectFirst("a");
-                            if (!seasonLinkElement) continue;
-                            const seasonRawTitle = seasonLinkElement.attr("title") || seasonItem.selectFirst("h3.title")?.text;
-                            const seasonName = this._titleEdit(seasonRawTitle);
-                            const seasonImageUrl = seasonItem.selectFirst("img")?.attr("data-src"); 
-                            const seasonLink = seasonLinkElement.getHref;
-                            list.push({ name: seasonName, imageUrl: seasonImageUrl, link: seasonLink });
+                        for (const season of seasonElements) {
+                            list.push({ name: this._titleEdit(season.attr("title")), imageUrl: season.selectFirst("img")?.attr("data-src"), link: season.getHref });
                         }
-                    } else {
-                        list.push({ name, imageUrl, link });
-                    }
-                } catch (error) {
-                    list.push({ name, imageUrl, link });
-                }
-            } else {
-                list.push({ name, imageUrl, link });
-            }
+                    } else { list.push({ name, imageUrl, link }); }
+                } catch (e) { list.push({ name, imageUrl, link }); }
+            } else { list.push({ name, imageUrl, link }); }
         }
         return list;
     }
 
     async getPopular(page) {
         const doc = await this.requestDoc(`/movies/page/${page}/`); 
-        const list = await this._processListingItems(doc); 
-        const hasNextPage = !!doc.selectFirst("div.pagination a.next");
-        return { list, hasNextPage };
+        return { list: await this._processListingItems(doc), hasNextPage: !!doc.selectFirst("div.pagination a.next") };
     }
 
     async getLatestUpdates(page) {
         const doc = await this.requestDoc(`/recent/page/${page}/`);
-        const list = await this._processListingItems(doc); 
-        const hasNextPage = !!doc.selectFirst("div.pagination a.next");
-        return { list, hasNextPage };
+        return { list: await this._processListingItems(doc), hasNextPage: !!doc.selectFirst("div.pagination a.next") };
     }
 
     async search(query, page, filters) {
         let path;
-        const categoryFilter = filters[0];   
         if (query) {
-            path = `/search/?query=${encodeURIComponent(query)}&offset=${page - 1}`; 
+            path = `/search/?query=${encodeURIComponent(query)}&offset=${page - 1}`;
         } else {
-            const selectedCategory = categoryFilter.values[categoryFilter.state].value;
-            if (selectedCategory) {
-                let basePath = selectedCategory; 
-                path = `${basePath.endsWith('/') ? basePath : basePath + '/'}page/${page}/`;
-            } else {
-                return this.getPopular(page);
-            }
+            const category = filters[0].values[filters[0].state].value;
+            if (category) {
+                path = `${category.endsWith('/') ? category : category + '/'}page/${page}/`;
+            } else { return this.getPopular(page); }
         }
-        const doc = await this.requestDoc(path); 
-        const list = await this._processListingItems(doc); 
-        const hasNextPage = !!doc.selectFirst("div.pagination a.next");
-        return { list, hasNextPage };
+        const doc = await this.requestDoc(path);
+        return { list: await this._processListingItems(doc), hasNextPage: !!doc.selectFirst("div.pagination a.next") };
     }
 
     async getDetail(url) {
-        const doc = await this.requestDoc(url.replace(this.source.baseUrl, '')); 
-        const name = this._titleEdit(doc.selectFirst("h1.post-title")?.text); 
+        const doc = await this.requestDoc(url.replace(this.source.baseUrl, ''));
+        const name = this._titleEdit(doc.selectFirst("h1.post-title")?.text);
         const imageUrl = doc.selectFirst("div.image img")?.getSrc;
         const description = doc.selectFirst("div.story")?.text.trim();
         const genre = doc.select("div.catssection li a").map(e => e.text);
@@ -177,104 +126,72 @@ class DefaultExtension extends MProvider {
         const episodeElements = doc.select("section.allepcont div.row a");
         if (episodeElements.length > 0) {
             episodeElements.forEach(ep => {
-                const epUrl = ep.getHref; 
-                const cleanEpName = this._titleEdit(ep.attr("title"));
-                chapters.push({ name: cleanEpName, url: epUrl }); 
+                chapters.push({ name: this._titleEdit(ep.attr("title")), url: ep.getHref });
             });
-        } else { 
-            chapters.push({ name: this._titleEdit("مشاهدة"), url: url }); 
+        } else {
+            chapters.push({ name: "مشاهدة", url: url });
         }
         return { name, imageUrl, description, genre, status: 1, chapters, link: url };
     }
 
     async getVideoList(url) {
         const streams = [];
-
-        // Step 1: Construct the download page URL from the original episode/movie URL.
-        // e.g., ".../episode-slug/" -> ".../episode-slug/download/"
         const downloadPagePath = url.replace(this.source.baseUrl, '') + (url.endsWith('/') ? 'download/' : '/download/');
-        
-        // Fetch the Topcinema download page.
-        const downloadPageDoc = await this.requestDoc(downloadPagePath, {
-            "Referer": url 
-        });
-
-        // Step 2: Find the VidTube link on the Topcinema download page.
-        // The selector targets the green VidTube server button.
+        const downloadPageDoc = await this.requestDoc(downloadPagePath, { "Referer": url });
         const vidtubeLinkElement = downloadPageDoc.selectFirst("div.proServer a.downloadsLink.proServer.green");
-        
-        if (!vidtubeLinkElement) {
-            console.warn("No VidTube download link found on: " + this.source.baseUrl + downloadPagePath);
-            return streams; // Return empty if no VidTube link exists.
-        }
+        if (!vidtubeLinkElement) return streams;
 
-        const vidtubeQualityPageUrl = vidtubeLinkElement.getHref; // e.g., https://vidtube.pro/d/cza0vtsn1wtr.html
-        
-        // Safely extract the origin (e.g., "https://vidtube.pro") for resolving relative links later.
+        const vidtubeQualityPageUrl = vidtubeLinkElement.getHref;
         const vidtubeOriginMatch = vidtubeQualityPageUrl.match(/^(https?:\/\/[^/]+)/);
         const vidtubeOrigin = vidtubeOriginMatch ? vidtubeOriginMatch[1] : '';
+        if (!vidtubeOrigin) return streams;
 
-        if (!vidtubeOrigin) {
-            console.error("Could not extract origin from VidTube URL: " + vidtubeQualityPageUrl);
-            return streams;
+        const vidtubeQualityPageDoc = await this.request(vidtubeQualityPageUrl, { "Referer": this.source.baseUrl + downloadPagePath }).then(res => new Document(res.body));
+        
+        const qualities = [];
+        const qualityLinkElements = vidtubeQualityPageDoc.select("div.row.mb-3 a.btn.btn-light");
+        for (const linkElement of qualityLinkElements) {
+            const relativePath = linkElement.getHref;
+            const qualityUrl = this.resolveRelativeUrl(relativePath, vidtubeOrigin);
+            let quality = (linkElement.selectFirst("b.text-primary")?.text.trim() || "") + " (" + (linkElement.selectFirst("span.small.text-muted")?.text.trim() || "") + ")";
+            qualities.push({ url: qualityUrl, quality: quality });
         }
 
-        // Step 3: Fetch the VidTube quality selection page.
-        const vidtubeQualityPageDoc = await this.request(vidtubeQualityPageUrl, {
-            "Referer": this.source.baseUrl + downloadPagePath // Referer from Topcinema download page.
-        }).then(res => new Document(res.body));
+        // ---- START: FIXED PREFERENCE LOGIC ----
+        const preferredQualitySetting = this.getPreference("preferred_quality");
+        let relevantQualities = [...qualities]; 
 
-        // Step 4: Extract all available quality download links from the VidTube page.
-        const qualityLinkElements = vidtubeQualityPageDoc.select("div.row.mb-3 a.btn.btn-light");
-
-        for (const linkElement of qualityLinkElements) {
-            try {
-                // The link is relative, e.g., "/d/cza0vtsn1wtr_x"
-                const relativeQualityPath = linkElement.getHref;
-                // Resolve it to an absolute URL, e.g., "https://vidtube.pro/d/cza0vtsn1wtr_x"
-                const absoluteQualityUrl = this.resolveRelativeUrl(relativeQualityPath, vidtubeOrigin);
-                
-                // Extract quality and size text.
-                const qualityText = linkElement.selectFirst("b.text-primary")?.text.trim() || "Unknown Quality";
-                const sizeText = linkElement.selectFirst("span.small.text-muted")?.text.trim() || "";
-
-                let quality = qualityText;
-                if (sizeText) {
-                    quality += ` (${sizeText})`; // Combine for a more descriptive name, e.g., "1080p FHD (1920x1072, 476.7 MB)"
-                }
-
-                // Step 5: Fetch the final download page for this specific quality.
-                const finalDownloadPageDoc = await this.request(absoluteQualityUrl, {
-                    "Referer": vidtubeQualityPageUrl // Referer from the VidTube quality selection page.
-                }).then(res => new Document(res.body));
-
-                // Step 6: Extract the direct video URL.
-                const directDownloadLinkElement = finalDownloadPageDoc.selectFirst("a.btn.btn-gradient.submit-btn");
-                const finalVideoUrl = directDownloadLinkElement?.getHref;
-
-                if (finalVideoUrl) {
-                    streams.push({
-                        url: finalVideoUrl,
-                        originalUrl: finalVideoUrl,
-                        quality: quality,
-                        headers: {
-                            // The Referer from VidTube's domain is crucial for the video to play.
-                            "Referer": vidtubeOrigin,
-                        }
-                    });
-                }
-            } catch (error) {
-                console.error(`Error processing a quality link:`, error);
+        if (preferredQualitySetting && preferredQualitySetting !== "Auto") {
+            const normalizedPreferred = preferredQualitySetting.toLowerCase();
+            const matchingQualities = qualities.filter(q => q.quality.toLowerCase().includes(normalizedPreferred));
+            if (matchingQualities.length > 0) {
+                relevantQualities = matchingQualities;
             }
         }
         
-        // Optional: Sort streams from highest to lowest quality based on the number in the quality string.
-        streams.sort((a, b) => {
+        relevantQualities.sort((a, b) => {
             const numA = parseInt(a.quality.match(/\d+/)?.[0] || '0');
             const numB = parseInt(b.quality.match(/\d+/)?.[0] || '0');
             return numB - numA;
         });
+        // ---- END: FIXED PREFERENCE LOGIC ----
 
+        for (const qualityEntry of relevantQualities) {
+            try {
+                const finalPageDoc = await this.request(qualityEntry.url, { "Referer": vidtubeQualityPageUrl }).then(res => new Document(res.body));
+                const finalVideoUrl = finalPageDoc.selectFirst("a.btn.btn-gradient.submit-btn")?.getHref;
+                if (finalVideoUrl) {
+                    streams.push({
+                        url: finalVideoUrl,
+                        originalUrl: finalVideoUrl,
+                        quality: qualityEntry.quality,
+                        headers: { "Referer": vidtubeOrigin }
+                    });
+                }
+            } catch (e) {
+                console.error(`Error fetching final URL for ${qualityEntry.quality}: ${e}`);
+            }
+        }
         return streams;
     }
 
@@ -284,7 +201,16 @@ class DefaultExtension extends MProvider {
     }
 
     getSourcePreferences() {
-        return [{key: "preferred_quality", listPreference: {title: "الجودة المفضلة", summary: "اختر الجودة المفضلة لديك", value: "720", entries: ["1080p FHD", "720p HD", "480p SD", "Auto"], entryValues: ["1080p", "720", "480", "Auto"]}}];
+        return [{
+            key: "preferred_quality",
+            listPreference: {
+                title: "الجودة المفضلة",
+                summary: "اختر الجودة المفضلة لديك",
+                value: "720", 
+                entries: ["1080p FHD", "720p HD", "480p SD", "Auto"], 
+                entryValues: ["1080", "720", "480", "Auto"], 
+            }
+        }];
     }
 }
 
