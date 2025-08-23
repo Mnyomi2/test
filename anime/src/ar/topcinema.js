@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "typeSource": "single",
     "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://web6.topcinema.cam",
     "itemType": 1,
-    "version": "1.0.2",
+    "version": "1.0.3",
     "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
