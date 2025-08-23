@@ -10,17 +10,17 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/en/epornerapi.js"
 }];
 
-// Helper function to safely extract text from a DOM element
-function getText(element) {
-    return element?.text?.trim() || '';
-}
-
-// Helper function to safely extract an attribute from a DOM element
-function getAttr(element, attr) {
-    return element?.attr(attr)?.trim() || '';
-}
-
 class DefaultExtension extends MProvider {
+    // Helper function to safely extract text from a DOM element
+    getText(element) {
+        return element?.text?.trim() || '';
+    }
+
+    // Helper function to safely extract an attribute from a DOM element
+    getAttr(element, attr) {
+        return element?.attr(attr)?.trim() || '';
+    }
+
     constructor() {
         super();
         this.client = new Client();
@@ -150,23 +150,23 @@ class DefaultExtension extends MProvider {
             const document = new Document(res.body);
 
             // 1. Extract Name & Image
-            const name = getText(document.selectFirst("h1.title-video")) || 
-                         getText(document.selectFirst("title"))?.replace(/ - Eporner$/i, '').trim() || 
+            const name = this.getText(document.selectFirst("h1.title-video")) || 
+                         this.getText(document.selectFirst("title"))?.replace(/ - Eporner$/i, '').trim() || 
                          "Unknown Title";
-            const imageUrl = getAttr(document.selectFirst('meta[property="og:image"]'), 'content') ||
+            const imageUrl = this.getAttr(document.selectFirst('meta[property="og:image"]'), 'content') ||
                              "https://www.google.com/s2/favicons?sz=256&domain=https://www.eporner.com";
 
             // 2. Extract structured metadata
-            const pornstars = document.select('li.vit-pornstar a').map(el => getText(el)).filter(Boolean);
-            const categories = document.select('li.vit-category a').map(el => getText(el)).filter(Boolean);
-            const tags = document.select('li.vit-tag a').map(el => getText(el)).filter(Boolean);
-            const uploader = getText(document.selectFirst('li.vit-uploader a'));
+            const pornstars = document.select('li.vit-pornstar a').map(el => this.getText(el)).filter(Boolean);
+            const categories = document.select('li.vit-category a').map(el => this.getText(el)).filter(Boolean);
+            const tags = document.select('li.vit-tag a').map(el => this.getText(el)).filter(Boolean);
+            const uploader = this.getText(document.selectFirst('li.vit-uploader a'));
 
             // 3. Combine categories, tags, and pornstars for the main `genres` array
             const genres = [...new Set([...pornstars, ...categories, ...tags])];
 
             // 4. Build a rich description
-            let mainDescription = getAttr(document.selectFirst('meta[property="og:description"]'), 'content');
+            let mainDescription = this.getAttr(document.selectFirst('meta[property="og:description"]'), 'content');
             if (mainDescription) {
                 mainDescription = mainDescription.replace(/Eporner is the largest hd porn source\.$/i, '').trim();
             }
@@ -176,11 +176,11 @@ class DefaultExtension extends MProvider {
             if (uploader) detailsParts.push(`Uploader: ${uploader}`);
             
             const stats = [];
-            const durationText = getText(document.selectFirst('span.duration'));
+            const durationText = this.getText(document.selectFirst('span.duration'));
             if (durationText) stats.push(`Length: ${durationText}`);
-            const viewsText = getText(document.selectFirst('span.views_count, span.video-info-views'));
+            const viewsText = this.getText(document.selectFirst('span.views_count, span.video-info-views'));
             if (viewsText) stats.push(`Views: ${viewsText}`);
-            const ratingText = getText(document.selectFirst('.stars-rating .vote-box-number, .star-rating-score'));
+            const ratingText = this.getText(document.selectFirst('.stars-rating .vote-box-number, .star-rating-score'));
             if (ratingText) stats.push(`Rating: ${ratingText}`);
             if (stats.length > 0) detailsParts.push(`Stats: ${stats.join(' • ')}`);
 
@@ -217,9 +217,9 @@ class DefaultExtension extends MProvider {
 
             for (let i = 0; i < downloadLinks.length; i++) {
                 const linkElement = downloadLinks[i];
-                const relativePath = getAttr(linkElement, "href");
+                const relativePath = this.getAttr(linkElement, "href");
                 const videoUrl = this._buildAbsoluteUrl(this.source.baseUrl, relativePath);
-                const linkText = getText(linkElement);
+                const linkText = this.getText(linkElement);
 
                 const qualityMatch = linkText.match(/(\d+p)(?:\((\d+K)\))?(@\d+fps)?(\sHD)?/i);
                 let qualityLabel = "UNKNOWN";
