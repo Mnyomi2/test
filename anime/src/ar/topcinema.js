@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "typeSource": "single",
     "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://web6.topcinema.cam",
     "itemType": 1,
-    "version": "1.0.2",
+    "version": "1.0.2", // Incremented version
     "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
@@ -169,10 +169,15 @@ class DefaultExtension extends MProvider {
             } catch (e) {}
         }
 
+        // Sort all streams with "Original" as highest, then numerically descending
         allStreams.sort((a, b) => {
-            const numA = parseInt(a.quality.match(/\d+/)?.[0] || '0');
-            const numB = parseInt(b.quality.match(/\d+/)?.[0] || '0');
-            return numB - numA;
+            const getQualityScore = (quality) => {
+                if (quality.toLowerCase().includes('original')) return 9999;
+                return parseInt(quality.match(/\d+/)?.[0] || '0');
+            };
+            const scoreA = getQualityScore(a.quality);
+            const scoreB = getQualityScore(b.quality);
+            return scoreB - scoreA;
         });
 
         const preferredQuality = this.getPreference("preferred_quality");
@@ -181,24 +186,30 @@ class DefaultExtension extends MProvider {
         }
 
         const qualityKeywords = {
-            "1080p": ["1080", "fhd", "original"],
+            "Original": ["original"],
+            "1080p": ["1080", "fhd"],
             "720p": ["720", "hd"],
             "480p": ["480", "sd"],
             "240p": ["240", "sd"]
         };
-
+        
         const targetKeywords = qualityKeywords[preferredQuality] || [preferredQuality];
         
-        const filteredStreams = allStreams.filter(stream => {
+        const preferred = [];
+        const other = [];
+
+        // Separate streams into preferred and other lists
+        allStreams.forEach(stream => {
             const streamQualityLower = stream.quality.toLowerCase();
-            return targetKeywords.some(keyword => streamQualityLower.includes(keyword));
+            if (targetKeywords.some(keyword => streamQualityLower.includes(keyword))) {
+                preferred.push(stream);
+            } else {
+                other.push(stream);
+            }
         });
-
-        if (filteredStreams.length > 0) {
-            return filteredStreams;
-        }
-
-        return allStreams;
+        
+        // Return the full list, with preferred qualities at the top
+        return [...preferred, ...other];
     }
 
     getFilterList() {
@@ -213,8 +224,8 @@ class DefaultExtension extends MProvider {
                 title: "الجودة المفضلة",
                 summary: "اختر الجودة المفضلة للفيديو",
                 valueIndex: 0,
-                entries: ["تلقائي (الأفضل)", "1080p FHD", "720p HD", "480p SD", "240p SD"],
-                entryValues: ["Auto", "1080p", "720p", "480p", "240p"]
+                entries: ["تلقائي (الأفضل)", "Original", "1080p FHD", "720p HD", "480p SD", "240p SD"],
+                entryValues: ["Auto", "Original", "1080p", "720p", "480p", "240p"]
             }
         }];
     }
