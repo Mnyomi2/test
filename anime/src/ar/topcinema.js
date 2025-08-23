@@ -10,28 +10,75 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
         this.client = new Client();
         this._allSources = mangayomiSources; 
         this.source.baseUrl = this.source.baseUrl.trim();
+        // Define a consistent User-Agent for all external requests
+        this._defaultHeaders = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.75 Safari/537.36",
+        };
     }
 
     getPreference(key) {
         return new SharedPreferences().get(key);
     }
 
+    // Centralized request method for fetching a Document (HTML parsing)
     async requestDoc(path, headers = {}) {
         const url = this.source.baseUrl + path;
-        const res = await this.client.get(url, { headers });
+        // The `request` method below handles merging `_defaultHeaders`
+        const res = await this.request(url, headers);
         return new Document(res.body);
     }
 
+    // Centralized request method for raw HTTP response
     async request(url, headers = {}) {
-        const res = await this.client.get(url, { headers });
+        // Merge custom headers with default headers, prioritizing custom ones
+        const requestHeaders = { ...this._defaultHeaders, ...headers };
+        const res = await this.client.get(url, { headers: requestHeaders });
         return res;
     }
+
+    /**
+     * Helper function to resolve relative URLs when `new URL()` is not available.
+     * This is needed because VidTube's quality links are relative paths.
+     * @param {string} path The potentially relative URL path.
+     * @param {string} baseUrl The base URL to resolve against.
+     * @returns {string} The resolved absolute URL.
+     */
+    resolveRelativeUrl(path, baseUrl) {
+        if (!path) return baseUrl;
+
+        // Already absolute
+        if (path.startsWith('http://') || path.startsWith('https://')) {
+            return path;
+        }
+        // Protocol-relative (e.g., //example.com/path)
+        if (path.startsWith('//')) {
+            const baseProtocolMatch = baseUrl.match(/^(https?):/);
+            return `${baseProtocolMatch ? baseProtocolMatch[1] : 'https'}:${path}`; // Use base protocol or default to https
+        }
+
+        const baseOriginMatch = baseUrl.match(/^(https?:\/\/[^/]+)/);
+        const baseOrigin = baseOriginMatch ? baseOriginMatch[1] : '';
+
+        // Absolute path from the base URL's origin (e.g., /some/path relative to https://example.com/dir/file)
+        if (path.startsWith('/')) {
+            return `${baseOrigin}${path}`;
+        }
+        
+        // Truly relative path (e.g., "file.html" relative to "base/dir/")
+        // Find the last slash in the base URL to determine the current directory
+        const lastSlashIndex = baseUrl.lastIndexOf('/');
+        const basePath = (lastSlashIndex > (baseOrigin.length + 2)) ? baseUrl.substring(0, lastSlashIndex + 1) : `${baseOrigin}/`; // Ensure it ends with a slash if it's a directory
+
+        return `${basePath}${path}`;
+    }
+
 
     /**
      * وظيفة شاملة لتنظيف وتنسيق عناوين الأفلام والمسلسلات.
@@ -120,6 +167,8 @@ class DefaultExtension extends MProvider {
             const imageUrl = item.selectFirst("img")?.attr(imageAttr);
 
             if (link.includes('/series/')) {
+                // WARNING: This nested request for each series item can be a performance bottleneck.
+                // Consider if fetching all seasons on the main listing page is strictly necessary.
                 try {
                     const seriesDetailPageDoc = await this.requestDoc(link.replace(this.source.baseUrl, ''));
                     const seasonElements = seriesDetailPageDoc.select("section.allseasonss div.Small--Box.Season");
@@ -137,11 +186,11 @@ class DefaultExtension extends MProvider {
                             list.push({ name: seasonName, imageUrl: seasonImageUrl, link: seasonLink });
                         }
                     } else {
-                        list.push({ name, imageUrl, link });
+                        list.push({ name, imageUrl, link }); // Fallback if no seasons found on series page
                     }
                 } catch (error) {
-                    console.error(`Error processing series ${name} (${link}):`, error);
-                    list.push({ name, imageUrl, link });
+                    console.error(`Error processing series ${name} (${link}):`, error, error.stack);
+                    list.push({ name, imageUrl, link }); // Add original series if season parsing fails
                 }
             } else {
                 list.push({ name, imageUrl, link });
@@ -235,463 +284,123 @@ class DefaultExtension extends MProvider {
     }
 
     async getVideoList(url) {
-        const videos = [];
-        const defaultHeaders = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.75 Safari/537.36",
-        };
+        const streams = [];
 
-        const downloadPageUrl = url.endsWith('/') ? url + 'download/' : url + '/download/';
-
-        if (downloadPageUrl) {
-            try {
-                const preferredDownloadServers = this.getPreference("preferred_download_servers") || [];
-                const downloadDoc = await this.requestDoc(downloadPageUrl.replace(this.source.baseUrl, ''), { "Referer": url });
-                
-                const proServerLinks = downloadDoc.select("div.proServer a.downloadsLink.proServer");
-                
-                if (preferredDownloadServers.includes("vidtube")) {
-                    for (const proLink of proServerLinks) {
-                        const proServerUrl = proLink.getHref;
-                        if (proServerUrl.includes("vidtube.pro")) {
-                            console.log(`Debug: Found VidTube proServer link: ${proServerUrl}`);
-                            const vidtubeVideos = await this._resolveVidTubeEntryPage(proServerUrl, { "Referer": downloadPageUrl });
-                            if (vidtubeVideos && vidtubeVideos.length > 0) {
-                                videos.push(...vidtubeVideos);
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.warn(`Error processing download page ${downloadPageUrl}:`, error);
-            }
-        }
-
-        const preferredQuality = this.getPreference("preferred_quality") || "720";
-        videos.sort((a, b) => {
-            const aPreferred = a.quality.includes(preferredQuality);
-            const bPreferred = b.quality.includes(preferredQuality);
-            if (aPreferred && !bPreferred) return -1;
-            if (!aPreferred && bPreferred) return 1;
-            return 0; 
+        // 1. Construct the download page URL from the original episode URL
+        // Example: https://web6.topcinema.cam/.../episode-slug/ -> https://web6.topcinema.cam/.../episode-slug/download/
+        const downloadPagePath = url.replace(this.source.baseUrl, '') + (url.endsWith('/') ? 'download/' : '/download/');
+        
+        // Fetch the Topcinema download page
+        const downloadPageDoc = await this.requestDoc(downloadPagePath, {
+            "Referer": url // Referer from episode page to download page
         });
 
-        console.log("Debug: Final video list before return:", videos);
-        return videos;
-    }
-
-    async _jsUnpack(packedJS) {
-        try {
-            const p_match = packedJS.match(/eval\(function\(p,a,c,k,e,d\){.*?}\('([^']+)',(\d+),(\d+),'([^']+)'\.split\('\|'\),0,{}\)\)/s);
-            if (!p_match) {
-                console.warn("JS Unpack: No p,a,c,k,e,d pattern found for unpacking.");
-                return null;
-            }
-
-            let p = p_match[1];
-            let a = parseInt(p_match[2]);
-            let c = parseInt(p_match[3]);
-            let k = p_match[4].split('|');
-
-            let e = function(val) {
-                return (val < a ? "" : e(parseInt(val / a))) + ((val = val % a) > 35 ? String.fromCharCode(val + 29) : val.toString(36));
-            };
-
-            let unpacked = p;
-            let i = c;
-
-            while (i--) {
-                if (k[i]) {
-                    unpacked = unpacked.replace(new RegExp('\\b' + e(i) + '\\b', 'g'), k[i]);
-                }
-            }
-            return unpacked;
-        } catch (error) {
-            console.error("Error during JS Unpack:", error);
-            return null;
+        // 2. Find the VidTube download link on the Topcinema download page
+        const vidtubeLinkElement = downloadPageDoc.selectFirst("div.proServer a.downloadsLink.proServer.green");
+        
+        if (!vidtubeLinkElement) {
+            console.warn("No VidTube download link found on: " + downloadPagePath);
+            return streams; // No VidTube link, return empty
         }
-    }
 
-    async _parseM3U8(m3u8Content, baseUrl, prefix) {
-        const videos = [];
-        const lines = m3u8Content.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
-                const resolutionMatch = lines[i].match(/RESOLUTION=(\d+x\d+)/);
-                const quality = resolutionMatch ? resolutionMatch[1] : 'Unknown';
-                const videoUrl = new URL(lines[i + 1], baseUrl).href; // Use URL constructor here, as it's a sub-request after initial setup
-                videos.push({
-                    url: videoUrl,
-                    originalUrl: videoUrl,
-                    quality: `${prefix} - ${quality}`, 
-                });
-            }
+        const vidtubeQualityPageUrl = vidtubeLinkElement.getHref; // e.g., https://vidtube.pro/d/bprhyyg93roo.html
+        
+        // FIX: Replace new URL().origin with string manipulation for compatibility
+        const vidtubeOriginMatch = vidtubeQualityPageUrl.match(/^(https?:\/\/[^/]+)/);
+        const vidtubeOrigin = vidtubeOriginMatch ? vidtubeOriginMatch[1] : '';
+
+        if (!vidtubeOrigin) {
+            console.error("Could not extract origin from VidTube URL: " + vidtubeQualityPageUrl);
+            return streams;
         }
-        if (videos.length === 0 && m3u8Content.includes('.m3u8')) {
-             videos.push({
-                 url: baseUrl,
-                 originalUrl: baseUrl,
-                 quality: `${prefix} - Auto`, 
-             });
-        }
-        return videos;
-    }
 
-    async _resolveCybervynxSmoothpre(url, prefix, headers) {
-        try {
-            const res = await this.request(url, headers);
-            const scriptData = res.body.match(/eval\(function\(p,a,c,k,e,d\).*\)/s)?.[0];
+        // 3. Fetch the VidTube quality selection page
+        const vidtubeQualityPageDoc = await this.request(vidtubeQualityPageUrl, {
+            "Referer": url // Referer from Topcinema episode page to VidTube
+        }).then(res => new Document(res.body));
 
-            if (!scriptData) {
-                const directMp4Match = res.body.match(/src="([^"]+\.mp4)"/)?.[1];
-                if (directMp4Match) {
-                     return [{ url: directMp4Match, originalUrl: url, quality: `${prefix} - SD` }];
-                }
-                const directM3u8Match = res.body.match(/(https?:\/\/[^"]+\.m3u8)/)?.[1];
-                if (directM3u8Match) {
-                    const m3u8Res = await this.request(directM3u8Match, { "Referer": url });
-                    return this._parseM3U8(m3u8Res.body, directM3u8Match, prefix);
-                }
-                return [];
-            }
+        // 4. Extract all available quality download links from VidTube
+        const qualityLinkElements = vidtubeQualityPageDoc.select("div.row.mb-3.justify-content-center .col-lg-6 a.btn.btn-light");
 
-            const unpacked = await this._jsUnpack(scriptData);
-            if (!unpacked) return [];
+        const qualities = [];
+        for (const linkElement of qualityLinkElements) {
+            const relativeQualityPath = linkElement.getHref; // e.g., /d/bprhyyg93roo_x
+            const absoluteQualityUrl = this.resolveRelativeUrl(relativeQualityPath, vidtubeOrigin); // Resolve relative path against VidTube origin
+            
+            const qualityTextElement = linkElement.selectFirst("b.text-primary.flex-grow-1.text-start.large");
+            const sizeTextElement = linkElement.selectFirst("span.small.text-muted");
+            
+            let quality = qualityTextElement?.text.trim() || "Unknown Quality";
+            let size = sizeTextElement?.text.trim() || "";
 
-            const mp4Match = unpacked.match(/file:"([^"]+\.mp4)"/)?.[1];
-            if (mp4Match) {
-                return [{ url: mp4Match, originalUrl: url, quality: `${prefix} - SD` }];
-            }
-
-            const masterUrl = unpacked.match(/file:"([^"]+\.m3u8)"/)?.[1];
-            if (masterUrl) {
-                const m3u8Res = await this.request(masterUrl, { "Referer": url });
-                return this._parseM3U8(m3u8Res.body, masterUrl, prefix);
-            }
-            return [];
-        } catch (error) {
-            console.error(`Error resolving ${prefix} (${url}):`, error);
-            return [];
-        }
-    }
-
-    async _resolveDoodStream(url, headers) {
-        try {
-            let currentHost = new URL(url).hostname;
-            if (currentHost.includes("dood.cx") || currentHost.includes("dood.wf")) {
-                currentHost = "dood.so";
-            }
-            if (currentHost.includes("dood.la") || currentHost.includes("dood.yt")) {
-                currentHost = "doodstream.com";
-            }
-
-            let embedId = url.split('/').pop();
-            if (!embedId || embedId.length < 5) {
-                 const matchId = url.match(/(?:\/d\/|\/e\/)([0-9a-zA-Z]+)/);
-                 if (matchId) embedId = matchId[1];
-            }
-            if (!embedId) {
-                console.warn("DoodStream: Could not extract embed ID from URL:", url);
-                return [];
-            }
-            const embedUrl = `https://${currentHost}/e/${embedId}`;
-
-            let doodHeaders = { ...headers, "Referer": `https://${currentHost}/` };
-
-            let res = await this.client.get(embedUrl, { headers: doodHeaders });
-            let html = res.body;
-
-            const match = html.match(/dsplayer\.hotkeys[^']+'([^']+).+?function\s*makePlay.+?return[^?]+([^"]+)/s);
-            if (match) {
-                const urlPart1 = match[1];
-                const tokenPart2 = match[2];
-                
-                const playUrl = new URL(urlPart1, embedUrl).href;
-                doodHeaders.Referer = embedUrl;
-
-                const playRes = await this.client.get(playUrl, { headers: doodHeaders });
-                const playHtml = playRes.body;
-
-                let vidSrc;
-                if (playHtml.includes("cloudflarestorage.")) {
-                    vidSrc = playHtml.trim();
-                } else {
-                    const charSet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-                    let randomString = '';
-                    for (let i = 0; i < 10; i++) {
-                        randomString += charSet.charAt(Math.floor(Math.random() * charSet.length));
-                    }
-                    vidSrc = playHtml.trim() + tokenPart2 + Date.now() + randomString;
-                }
-
-                return [{
-                    url: vidSrc,
-                    originalUrl: embedUrl,
-                    quality: `Doodstream`
-                }];
-            }
-            return [];
-        } catch (error) {
-            console.error(`Error resolving DoodStream (${url}):`, error);
-            return [];
-        }
-    }
-
-    async _resolveMixDrop(url, headers) {
-        try {
-            let currentHost = new URL(url).hostname;
-            if (currentHost.includes(".club")) {
-                currentHost = currentHost.replace(".club", ".co");
+            // Add size to quality for better identification, if available
+            if (size) {
+                quality += ` (${size})`;
             }
             
-            const matchId = url.match(/(?:\/e\/)([0-9a-zA-Z]+)/);
-            if (!matchId) {
-                console.warn("MixDrop: Could not extract embed ID from URL:", url);
-                return [];
+            if (absoluteQualityUrl) {
+                qualities.push({ url: absoluteQualityUrl, quality: quality });
             }
-            const embedId = matchId[1];
-            let embedUrl = `https://${currentHost}/e/${embedId}`;
-
-            let mixdropHeaders = { ...headers, "Origin": `https://${currentHost}`, "Referer": `https://${currentHost}/` };
-
-            let res = await this.client.get(embedUrl, { headers: mixdropHeaders });
-            let html = res.body;
-
-            const redirectMatch = html.match(/location\s*=\s*["']([^'"]+)/);
-            if (redirectMatch) {
-                const newPath = redirectMatch[1];
-                mixdropHeaders.Referer = embedUrl;
-                const redirectedEmbedUrl = new URL(newPath, embedUrl).href;
-                res = await this.client.get(redirectedEmbedUrl, { headers: mixdropHeaders });
-                html = res.body;
-                embedUrl = redirectedEmbedUrl;
-            }
-
-            if (html.includes('(p,a,c,k,e,d)')) {
-                const scriptData = html.match(/eval\(function\(p,a,c,k,e,d\).*\)/s)?.[0];
-                if (scriptData) {
-                    html = await this._jsUnpack(scriptData) || html;
-                }
-            }
-
-            const surlMatch = html.match(/(?:vsr|wurl|surl)[^=]*=\s*"([^"]+)/);
-            if (surlMatch) {
-                let surl = surlMatch[1];
-                if (surl.startsWith('//')) {
-                    surl = 'https:' + surl;
-                }
-                
-                return [{
-                    url: surl,
-                    originalUrl: embedUrl,
-                    quality: `MixDrop`
-                }];
-            }
-            return [];
-        } catch (error) {
-            console.error(`Error resolving MixDrop (${url}):`, error);
-            return [];
         }
-    }
 
-    async _resolveVidTubeEntryPage(vidtubeEntryUrl, headers = {}) {
-        console.log(`Debug: _resolveVidTubeEntryPage START for ${vidtubeEntryUrl}`);
-        const videos = [];
-        try {
-            // Replaced new URL(vidtubeEntryUrl) to avoid 'URL is not defined' error
-            const originMatch = vidtubeEntryUrl.match(/^(https?:\/\/[^/]+)/);
-            if (!originMatch) {
-                console.warn(`VidTube: Could not extract origin from VidTube entry URL: ${vidtubeEntryUrl}`);
-                throw new Error("Could not extract origin from VidTube entry URL.");
-            }
-            const origin = originMatch[1]; // e.g., "https://vidtube.pro"
+        // 5. Apply preferred quality filter and sorting
+        const preferredQualitySetting = this.getPreference("preferred_quality");
+        let relevantQualities = [...qualities]; // Start with all qualities
 
-            const pathnameMatch = vidtubeEntryUrl.match(/\/d\/([a-zA-Z0-9]+)\.html/);
-            if (!pathnameMatch || !pathnameMatch[1]) {
-                console.warn(`VidTube: Could not extract FILE_ID from ${vidtubeEntryUrl}. Pathname: ${vidtubeEntryUrl.split('/').pop()}`);
-                videos.push({
-                    url: vidtubeEntryUrl,
-                    originalUrl: vidtubeEntryUrl,
-                    quality: `VidTube (FILE_ID Not Found - ${vidtubeEntryUrl})`
-                });
-                return videos; 
-            }
-            const fileId = pathnameMatch[1];
-            console.log(`Debug: Extracted FILE_ID: ${fileId}`);
-
-            // Construct the embed URL as requested: https://vidtube.pro/embed-FILE_ID.html
-            const embedUrl = `${origin}/embed-${fileId}.html`;
-            console.log(`Debug: Constructed embed URL: ${embedUrl}`);
-
-            // Now, extract video(s) from the constructed embed page
-            const embedHeaders = { ...headers, "Referer": `${origin}/` }; // Use extracted origin for Referer
-            console.log(`Debug: Calling _extractVideoFromVidTubeEmbed for ${embedUrl}`);
-            const extractedVideos = await this._extractVideoFromVidTubeEmbed(embedUrl, embedHeaders);
-            videos.push(...extractedVideos);
-            console.log(`Debug: _resolveVidTubeEntryPage END successfully for ${vidtubeEntryUrl}`);
-
-        } catch (error) {
-            console.error(`Error in _resolveVidTubeEntryPage for ${vidtubeEntryUrl}:`, error);
-            videos.push({
-                url: vidtubeEntryUrl,
-                originalUrl: vidtubeEntryUrl,
-                quality: `VidTube (Entry Error: ${error.message || 'Unknown'}) - ${vidtubeEntryUrl}`
-            });
-        }
-        return videos;
-    }
-
-    async _extractVideoFromVidTubeEmbed(embedUrl, headers = {}) {
-        console.log(`Debug: _extractVideoFromVidTubeEmbed START for ${embedUrl}`);
-        const videos = [];
-        let html = ""; 
-
-        try {
-            const res = await this.client.get(embedUrl, { headers });
+        if (preferredQualitySetting && preferredQualitySetting !== "Auto") {
+            const normalizedPreferred = preferredQualitySetting.toLowerCase();
+            const matchingQualities = qualities.filter(q => 
+                q.quality.toLowerCase().includes(normalizedPreferred)
+            );
             
-            if (!res.ok) {
-                console.warn(`Debug: Failed to fetch VidTube embed page ${embedUrl}. Status: ${res.status} - ${res.statusText}`);
-                videos.push({
-                    url: embedUrl,
-                    originalUrl: embedUrl,
-                    quality: `VidTube (Embed HTTP Error: ${res.status}) - ${embedUrl}`
-                });
-                return videos;
+            if (matchingQualities.length > 0) {
+                relevantQualities = matchingQualities;
+            } else {
+                console.warn(`Preferred quality "${preferredQualitySetting}" not found among available streams, using all available. Fallback to all qualities.`);
             }
+        }
+        
+        // Sort qualities from highest to lowest resolution (numeric value)
+        relevantQualities.sort((a, b) => {
+            const numA = parseInt(a.quality.match(/\d+/)?.[0] || '0');
+            const numB = parseInt(b.quality.match(/\d+/)?.[0] || '0');
+            return numB - numA; // Descending order
+        });
 
-            html = res.body; 
-            console.log(`Debug: Fetched embed page HTML for ${embedUrl}. Length: ${html.length}`);
 
-            // 1. Check for packed JS and unpack it
-            if (html.includes('(p,a,c,k,e,d)')) {
-                const scriptData = html.match(/eval\(function\(p,a,c,k,e,d\).*\)/s)?.[0];
-                if (scriptData) {
-                    const unpacked = await this._jsUnpack(scriptData);
-                    if (unpacked) {
-                        html = unpacked; 
-                        console.log("Debug: VidTube embed page unpacked successfully.");
-                    } else {
-                        console.warn("Debug: VidTube embed page unpacking failed, proceeding with original HTML.");
-                    }
-                }
-            }
+        // 6. Fetch the final direct video URL for each selected quality
+        for (const qualityEntry of relevantQualities) {
+            try {
+                // Fetch the VidTube final download link page
+                const finalDownloadPageDoc = await this.request(qualityEntry.url, {
+                    "Referer": vidtubeOrigin // Referer from VidTube quality page to VidTube final download page
+                }).then(res => new Document(res.body));
 
-            // 2. Attempt to find JWPlayer configuration
-            let jwplayerFileMatch = html.match(/(?:jwplayer\(.+?\)|playerInstance)\.setup\s*\(\s*{[^}]*?"file"\s*:\s*["']([^"']+\.(?:mp4|m3u8)[^"']*)["']/s);
-            if (jwplayerFileMatch) {
-                let videoSource = jwplayerFileMatch[1];
-                videoSource = videoSource.replace(/\\(.)/g, '$1'); 
+                const directDownloadLinkElement = finalDownloadPageDoc.selectFirst("a.btn.btn-gradient.submit-btn");
+                const finalVideoUrl = directDownloadLinkElement?.getHref;
 
-                // Replaced new URL(videoSource, embedUrl).href to avoid 'URL is not defined' error if videoSource is relative
-                if (videoSource.startsWith('//')) {
-                    videoSource = `https:${videoSource}`;
-                } else if (videoSource.startsWith('/')) {
-                    const embedOriginMatch = embedUrl.match(/^(https?:\/\/[^/]+)/);
-                    if (embedOriginMatch) {
-                        videoSource = `${embedOriginMatch[1]}${videoSource}`;
-                    } else {
-                        console.warn(`VidTube: Could not determine origin for relative videoSource: ${videoSource} from ${embedUrl}. Hardcoding VidTube origin.`);
-                        videoSource = `https://vidtube.pro${videoSource}`; // Fallback for VidTube's known origin
-                    }
-                }
-
-                console.log(`Debug: Found JWPlayer video source: ${videoSource}`);
-
-                if (videoSource.includes('.m3u8')) {
-                    console.log(`Debug: Fetching M3U8 for ${videoSource}`);
-                    // Use URL constructor here as this is a separate fetch for an M3U8 manifest,
-                    // and baseUrl is needed. If URL is still undefined here, this will fail.
-                    // Assuming URL is defined for nested uses.
-                    const m3u8Res = await this.request(videoSource, { "Referer": embedUrl }); 
-                    const parsedM3U8Videos = await this._parseM3U8(m3u8Res.body, videoSource, "VidTube");
-                    if (parsedM3U8Videos.length > 0) {
-                        parsedM3U8Videos.forEach(v => {
-                            v.quality = `VidTube - ${v.quality} (${videoSource.substring(0, 50)}...)`; // Shorten URL for display
-                        });
-                        videos.push(...parsedM3U8Videos);
-                    } else {
-                         videos.push({
-                            url: videoSource,
-                            originalUrl: embedUrl,
-                            quality: `VidTube - Auto M3U8 (No Qualities Found - ${videoSource.substring(0, 50)}...)`
-                        });
-                    }
-                    console.log(`Debug: _extractVideoFromVidTubeEmbed END for ${embedUrl} (JWPlayer M3U8)`);
-                    return videos;
-                } else {
-                    videos.push({
-                        url: videoSource,
-                        originalUrl: embedUrl,
-                        quality: `VidTube - MP4 (${videoSource.substring(0, 50)}...)` 
-                    });
-                    console.log(`Debug: _extractVideoFromVidTubeEmbed END for ${embedUrl} (JWPlayer MP4)`);
-                    return videos;
-                }
-            }
-
-            // 3. Fallback: Look for a direct <video> tag
-            const doc = new Document(html); 
-            const videoElement = doc.selectFirst('video');
-            if (videoElement) {
-                let videoSource = videoElement.getSrc || videoElement.attr('src'); 
-                 if (videoSource) {
-                    // Replaced new URL(videoSource, embedUrl).href to avoid 'URL is not defined' error if videoSource is relative
-                    if (videoSource.startsWith('//')) {
-                        videoSource = `https:${videoSource}`;
-                    } else if (videoSource.startsWith('/')) {
-                        const embedOriginMatch = embedUrl.match(/^(https?:\/\/[^/]+)/);
-                        if (embedOriginMatch) {
-                            videoSource = `${embedOriginMatch[1]}${videoSource}`;
-                        } else {
-                            console.warn(`VidTube: Could not determine origin for relative videoSource: ${videoSource} from ${embedUrl}. Hardcoding VidTube origin.`);
-                            videoSource = `https://vidtube.pro${videoSource}`; // Fallback for VidTube's known origin
+                if (finalVideoUrl) {
+                    streams.push({
+                        url: finalVideoUrl,
+                        originalUrl: finalVideoUrl,
+                        quality: qualityEntry.quality, // Use the full quality string (e.g., "1080p FHD (1920x800, 619.8 MB)")
+                        headers: {
+                            "Referer": vidtubeOrigin, // Crucial for playing the video stream
+                            ...this._defaultHeaders // Merge other default headers like User-Agent
                         }
-                    }
-                    console.log(`Debug: Found <video> tag source: ${videoSource}`);
-
-                     if (videoSource.includes('.m3u8')) {
-                        console.log(`Debug: Fetching M3U8 for ${videoSource} from <video> tag`);
-                        const m3u8Res = await this.request(videoSource, { "Referer": embedUrl });
-                        const parsedM3U8Videos = await this._parseM3U8(m3u8Res.body, videoSource, "VidTube");
-                         parsedM3U8Videos.forEach(v => {
-                            v.quality = `VidTube - ${v.quality} (${videoSource.substring(0, 50)}...)`;
-                        });
-                        videos.push(...parsedM3U8Videos);
-                        console.log(`Debug: _extractVideoFromVidTubeEmbed END for ${embedUrl} (<video> M3U8)`);
-                        return videos;
-                    } else {
-                        videos.push({
-                            url: videoSource,
-                            originalUrl: embedUrl,
-                            quality: `VidTube - MP4 (${videoSource.substring(0, 50)}...)`
-                        });
-                        console.log(`Debug: _extractVideoFromVidTubeEmbed END for ${embedUrl} (<video> MP4)`);
-                        return videos;
-                    }
-                 }
+                    });
+                }
+            } catch (error) {
+                console.error(`Error fetching final video for quality ${qualityEntry.quality} from ${qualityEntry.url}:`, error, error.stack);
             }
-
-            // Fallback if no video source is found through any method
-            console.warn(`Debug: No video source found on VidTube embed page: ${embedUrl}. Returning fallback.`);
-            videos.push({
-                url: embedUrl, 
-                originalUrl: embedUrl,
-                quality: `VidTube (No Stream Found - ${embedUrl})`
-            });
-            console.log(`Debug: _extractVideoFromVidTubeEmbed END with fallback for ${embedUrl}`);
-            return videos;
-
-        } catch (error) {
-            console.error(`Error in _extractVideoFromVidTubeEmbed for ${embedUrl}:`, error);
-            videos.push({
-                url: embedUrl,
-                originalUrl: embedUrl,
-                quality: `VidTube (Embed Processing Error: ${error.message || 'Unknown'}) - ${embedUrl}` 
-            });
-            console.log(`Debug: _extractVideoFromVidTubeEmbed END with error for ${embedUrl}`);
-            return videos;
         }
-    }
+        
+        // No subtitles mentioned or extractable from this flow based on the provided HTML examples.
+        // If subtitles are present in the final HTML page for the video, add logic here.
 
+        return streams;
+    }
+	
     getFilterList() {
         const categories = [{
             "name": "اختر",
@@ -760,8 +469,8 @@ class DefaultExtension extends MProvider {
                 title: "الجودة المفضلة",
                 summary: "اختر الجودة المفضلة لديك",
                 value: "720", 
-                entries: ["720p", "480p", "360p", "Auto"], 
-                entryValues: ["720", "480", "360", "Auto"], 
+                entries: ["1080p FHD", "720p HD", "480p SD", "Auto"], 
+                entryValues: ["1080p", "720", "480", "Auto"], 
             }
         }, {
             key: "preferred_download_servers",
