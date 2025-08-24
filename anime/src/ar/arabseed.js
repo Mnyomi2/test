@@ -45,8 +45,8 @@ class DefaultExtension extends MProvider {
         const list = doc.select("div.MovieBlock").map(element => {
             const title = element.selectFirst("h4")?.text || element.selectFirst("img")?.attr("alt") || "";
             const link = element.selectFirst("a")?.getHref;
-            const imgElement = element.selectFirst("div.Poster img");
-            const imageUrl = imgElement?.attr("data-src") || imgElement?.getSrc || "";
+            const imageUrl = element.selectFirst("div.Poster img")?.attr("data-src") ||
+                             element.selectFirst("div.Poster img")?.getSrc || "";
             if (!title || !link) return null;
             return { name: title.trim(), link, imageUrl };
         }).filter(it => it != null);
@@ -63,10 +63,14 @@ class DefaultExtension extends MProvider {
         const list = doc.select("div.MovieBlock").map(element => {
             const title = element.selectFirst("h4")?.text || element.selectFirst("img")?.attr("alt") || "";
             const link = element.selectFirst("a")?.getHref;
-            // FIXED: More robust image selector specifically for the 'Latest' section
-            const imgElement = element.selectFirst("div.Poster img");
-            const imageUrl = imgElement?.getSrc || imgElement?.attr("data-src") || "";
             
+            // FIX: Use regex to get the clean, full-size image URL for the 'Latest' section.
+            let imageUrl = element.selectFirst("div.Poster img")?.getSrc || "";
+            const match = imageUrl.match(/(.*?)_V1_.*\.jpg$/);
+            if (match && match[1]) {
+                imageUrl = match[1] + ".jpg";
+            }
+
             if (!title || !link) return null;
             return { name: title.trim(), link, imageUrl };
         }).filter(it => it != null);
@@ -90,8 +94,7 @@ class DefaultExtension extends MProvider {
             const parseSearchItem = (element) => {
                 const title = element.selectFirst("h4")?.text || element.selectFirst("img")?.attr("alt") || "";
                 const link = element.selectFirst("a")?.getHref;
-                const imgElement = element.selectFirst("div.Poster img");
-                const imageUrl = imgElement?.attr("data-src") || imgElement?.getSrc || "";
+                const imageUrl = element.selectFirst("div.Poster img")?.attr("data-src") || element.selectFirst("div.Poster img")?.getSrc || "";
                 if (!title || !link) return null;
                 return { name: title.trim(), link, imageUrl };
             };
@@ -113,8 +116,8 @@ class DefaultExtension extends MProvider {
             const list = doc.select("div.MovieBlock").map(element => {
                 const title = element.selectFirst("h4")?.text || element.selectFirst("img")?.attr("alt") || "";
                 const link = element.selectFirst("a")?.getHref;
-                const imgElement = element.selectFirst("div.Poster img");
-                const imageUrl = imgElement?.attr("data-src") || imgElement?.getSrc || "";
+                const imageUrl = element.selectFirst("div.Poster img")?.attr("data-src") ||
+                                 element.selectFirst("div.Poster img")?.getSrc || "";
                 if (!title || !link) return null;
                 return { name: title.trim(), link, imageUrl };
             }).filter(it => it != null);
