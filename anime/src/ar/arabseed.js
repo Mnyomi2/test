@@ -11,6 +11,8 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/arabseed.js"
 }];
 
+
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -19,91 +21,112 @@ class DefaultExtension extends MProvider {
     }
 
     // --- PREFERENCES ---
-
     getPreference(key) {
         return new SharedPreferences().get(key);
     }
 
     getBaseUrl() {
-        // Use the preference value, or fall back to the source's default baseUrl
         return this.getPreference("override_base_url") || this.source.baseUrl;
     }
 
     // --- HELPERS ---
-
-    // Extracts the first number from a string.
     getIntFromText(text) {
         if (!text) return null;
         const match = text.match(/\d+/);
         return match ? parseInt(match[0]) : null;
     }
 
-    // Parses a single item from a catalogue or search result page.
-    parseCatalogueItem(element) {
-        const title = element.selectFirst("h4").text;
-        const link = element.selectFirst("a").getHref;
-        const imageUrl = element.selectFirst("img.imgOptimzer")?.attr("data-image") ||
-                         element.selectFirst("div.Poster img")?.attr("data-src") || "";
-        
-        return { name: title, link, imageUrl };
-    }
-
-    // --- CATALOGUE ---
-
+    // --- CATALOGUE & SEARCH ---
     async getPopular(page) {
-        const url = `${this.getBaseUrl()}/movies/?offset=${page}`;
+        const url = `${this.getBaseUrl()}/movies/page/${page}/`;
         const res = await this.client.get(url, {}, { timeout: 120000 });
         const doc = new Document(res.body);
         
-        const list = doc.select("ul.Blocks-UL > div").map(el => this.parseCatalogueItem(el));
+        const list = doc.select("div.MovieBlock").map(element => {
+            const title = element.selectFirst("h4")?.text || element.selectFirst("img")?.attr("alt") || "";
+            const link = element.selectFirst("a")?.getHref;
+            const imgElement = element.selectFirst("div.Poster img");
+            const imageUrl = imgElement?.attr("data-src") || imgElement?.getSrc || "";
+            if (!title || !link) return null;
+            return { name: title.trim(), link, imageUrl };
+        }).filter(it => it != null);
         
-        // ArabSeed uses infinite scroll, so we assume there's always a next page
-        // until an empty list is returned.
-        const hasNextPage = list.length > 0;
-        
+        const hasNextPage = doc.selectFirst("div.pagination a.next") != null;
         return { list, hasNextPage };
     }
 
     async getLatestUpdates(page) {
-        const url = `${this.getBaseUrl()}/series/?offset=${page}`;
+        const url = `${this.getBaseUrl()}/series/page/${page}/`;
         const res = await this.client.get(url, {}, { timeout: 120000 });
         const doc = new Document(res.body);
 
-        const list = doc.select("ul.Blocks-UL > div").map(el => this.parseCatalogueItem(el));
-        const hasNextPage = list.length > 0;
+        const list = doc.select("div.MovieBlock").map(element => {
+            const title = element.selectFirst("h4")?.text || element.selectFirst("img")?.attr("alt") || "";
+            const link = element.selectFirst("a")?.getHref;
+            // FIXED: More robust image selector specifically for the 'Latest' section
+            const imgElement = element.selectFirst("div.Poster img");
+            const imageUrl = imgElement?.getSrc || imgElement?.attr("data-src") || "";
+            
+            if (!title || !link) return null;
+            return { name: title.trim(), link, imageUrl };
+        }).filter(it => it != null);
 
+        const hasNextPage = doc.selectFirst("div.pagination a.next") != null;
         return { list, hasNextPage };
     }
 
     async search(query, page, filters) {
-        // The site's search is not paginated, so we only run it for the first page.
-        if (page > 1) {
-            return { list: [], hasNextPage: false };
+        if (query) {
+            if (page > 1) return { list: [], hasNextPage: false };
+            
+            const searchUrl = `${this.getBaseUrl()}/wp-content/themes/Elshaikh2021/Ajaxat/SearchingTwo.php`;
+            const headers = { "Referer": this.getBaseUrl() };
+            
+            const [seriesRes, moviesRes] = await Promise.all([
+                this.client.post(searchUrl, headers, { search: query, type: 'series' }),
+                this.client.post(searchUrl, headers, { search: query, type: 'movies' })
+            ]);
+
+            const parseSearchItem = (element) => {
+                const title = element.selectFirst("h4")?.text || element.selectFirst("img")?.attr("alt") || "";
+                const link = element.selectFirst("a")?.getHref;
+                const imgElement = element.selectFirst("div.Poster img");
+                const imageUrl = imgElement?.attr("data-src") || imgElement?.getSrc || "";
+                if (!title || !link) return null;
+                return { name: title.trim(), link, imageUrl };
+            };
+
+            const seriesList = new Document(seriesRes.body).select("ul.Blocks-UL > div").map(parseSearchItem).filter(Boolean);
+            const moviesList = new Document(moviesRes.body).select("ul.Blocks-UL > div").map(parseSearchItem).filter(Boolean);
+            
+            return { list: [...moviesList, ...seriesList], hasNextPage: false };
+        } else {
+            const categoryFilter = filters.find(f => f.name === "القسم");
+            const selectedCategory = categoryFilter.values[categoryFilter.state].value;
+            
+            if (!selectedCategory) return this.getPopular(page);
+            
+            const url = `${this.getBaseUrl()}${selectedCategory}page/${page}/`;
+            const res = await this.client.get(url);
+            const doc = new Document(res.body);
+            
+            const list = doc.select("div.MovieBlock").map(element => {
+                const title = element.selectFirst("h4")?.text || element.selectFirst("img")?.attr("alt") || "";
+                const link = element.selectFirst("a")?.getHref;
+                const imgElement = element.selectFirst("div.Poster img");
+                const imageUrl = imgElement?.attr("data-src") || imgElement?.getSrc || "";
+                if (!title || !link) return null;
+                return { name: title.trim(), link, imageUrl };
+            }).filter(it => it != null);
+            
+            const hasNextPage = doc.selectFirst("div.pagination a.next") != null;
+            return { list, hasNextPage };
         }
-        
-        const searchUrl = `${this.getBaseUrl()}/wp-content/themes/Elshaikh2021/Ajaxat/SearchingTwo.php`;
-        const headers = { "Referer": this.getBaseUrl() };
-        
-        const seriesPromise = this.client.post(searchUrl, headers, { search: query, type: 'series' });
-        const moviesPromise = this.client.post(searchUrl, headers, { search: query, type: 'movies' });
-
-        const [seriesRes, moviesRes] = await Promise.all([seriesPromise, moviesPromise]);
-
-        const seriesDoc = new Document(seriesRes.body);
-        const moviesDoc = new Document(moviesRes.body);
-
-        const seriesList = seriesDoc.select("ul.Blocks-UL > div").map(el => this.parseCatalogueItem(el));
-        const moviesList = moviesDoc.select("ul.Blocks-UL > div").map(el => this.parseCatalogueItem(el));
-
-        const combinedList = [...seriesList, ...moviesList];
-
-        return { list: combinedList, hasNextPage: false };
     }
 
-    // --- DETAILS AND EPISODES ---
-
+    // --- DETAILS ---
     async getDetail(url) {
-        const res = await this.client.get(url, {}, { timeout: 120000 });
+        const res = await this.client.get(url);
         const doc = new Document(res.body);
 
         const name = doc.selectFirst("h1.Title")?.text || doc.selectFirst("div.Title")?.text || "";
@@ -113,67 +136,50 @@ class DefaultExtension extends MProvider {
         const imageUrl = posterElement?.attr("data-src") || posterElement?.attr("src") || "";
 
         const description = doc.select("p.descrip").last?.text || "";
-        const year = this.getIntFromText(doc.selectFirst("li:contains(السنه) a")?.text);
-        const genre = doc.select("li:contains(النوع) > a, li:contains(التصنيف) > a").map(it => it.text);
+        const genre = doc.select("li:contains(النوع) > a, li:contains(التصنيف) > a").map(it => it.text.trim());
         
         const chapters = [];
-
         if (isMovie) {
-            chapters.push({ name: "Movie", url: url });
+            chapters.push({ name: name, url });
         } else {
             const seasonElements = doc.select("div.SeasonsListHolder ul > li");
             if (seasonElements.length > 0) {
                 const episodesUrl = `${this.getBaseUrl()}/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php`;
-                
                 const episodePromises = seasonElements.map(async (seasonEl) => {
                     const season = seasonEl.attr("data-season");
                     const postId = seasonEl.attr("data-id");
-                    const seasonNum = this.getIntFromText(season);
+                    const seasonNum = this.getIntFromText(seasonEl.text) || 1;
 
-                    const res = await this.client.post(episodesUrl, {}, { season, post_id: postId });
-                    const epsDoc = new Document(res.body);
-
-                    return epsDoc.select("a").map(epEl => ({
-                        name: epEl.text,
-                        url: epEl.getHref,
-                        season: seasonNum,
-                        episode: this.getIntFromText(epEl.text),
-                    }));
+                    try {
+                        const res = await this.client.post(episodesUrl, {}, { season, post_id: postId });
+                        const epsDoc = new Document(res.body);
+                        return epsDoc.select("a").map(epEl => ({
+                            name: `الموسم ${seasonNum} - ${epEl.text}`,
+                            url: epEl.getHref,
+                            season: seasonNum,
+                            episode: this.getIntFromText(epEl.text),
+                        }));
+                    } catch { return []; }
                 });
-
                 const allEpisodes = (await Promise.all(episodePromises)).flat();
                 chapters.push(...allEpisodes);
-
             } else {
                 doc.select("div.ContainerEpisodesList > a").forEach(epEl => {
                     chapters.push({
                         name: epEl.text,
                         url: epEl.getHref,
-                        season: 1, // Assume season 1 if not specified
+                        season: 1, 
                         episode: this.getIntFromText(epEl.text),
                     });
                 });
             }
         }
         
-        // Sort chapters correctly
-        chapters.sort((a, b) => {
-            if (a.season !== b.season) return a.season - b.season;
-            return a.episode - b.episode;
-        });
-
-        return {
-            name,
-            imageUrl,
-            description,
-            genre,
-            year,
-            chapters
-        };
+        chapters.sort((a, b) => (a.season - b.season) || (a.episode - b.episode));
+        return { name, imageUrl, description, genre, chapters };
     }
 
-    // --- VIDEO EXTRACTION ---
-
+    // --- VIDEO ---
     async getVideoList(url) {
         const res = await this.client.get(url);
         const doc = new Document(res.body);
@@ -192,7 +198,9 @@ class DefaultExtension extends MProvider {
                 currentQuality = element.text;
             } else {
                 const iframeUrl = element.attr("data-link");
-                if (iframeUrl.includes("arabseed")) {
+                const serverName = element.text;
+
+                if (serverName.includes("عرب سيد")) {
                     try {
                         const iframeRes = await this.client.get(iframeUrl);
                         const iframeDoc = new Document(iframeRes.body);
@@ -200,30 +208,55 @@ class DefaultExtension extends MProvider {
                         if (sourceElement) {
                             videos.push({
                                 url: sourceElement.attr("src"),
-                                quality: currentQuality,
+                                quality: `${serverName} - ${currentQuality}`,
                                 originalUrl: sourceElement.attr("src"),
                                 headers: { "Referer": iframeUrl }
                             });
                         }
                     } catch (e) {
-                        // Ignore errors for individual servers
                         console.log(`Failed to extract from ${iframeUrl}: ${e}`);
                     }
                 }
             }
         }
         
+        if (videos.length === 0) throw new Error("No direct 'ArabSeed' servers found.");
         return videos;
     }
     
-    // --- PREFERENCES ---
+    // --- FILTERS & PREFERENCES ---
+    getFilterList() {
+        const categories = [
+            { name: 'الكل', value: '' },
+            { name: 'افلام Netfilx', value: '/category/netfilx/افلام-netfilx/' },
+            { name: 'افلام اجنبي', value: '/category/foreign-movies/' },
+            { name: 'افلام عربي', value: '/category/arabic-movies-5/' },
+            { name: 'افلام اسيوية', value: '/category/asian-movies/' },
+            { name: 'افلام تركية', value: '/category/turkish-movies/' },
+            { name: 'افلام هندى', value: '/category/indian-movies/' },
+            { name: 'افلام انيميشن', value: '/category/افلام-انيميشن/' },
+            { name: 'مسلسلات عربي', value: '/category/arabic-series/' },
+            { name: 'مسلسلات اجنبي', value: '/category/foreign-series/' },
+            { name: 'مسلسلات تركيه', value: '/category/turkish-series-1/' },
+            { name: 'مسلسلات كرتون', value: '/category/cartoon-series/' },
+            { name: 'مسلسلات رمضان 2025', value: '/category/مسلسلات-رمضان/ramadan-series-2025/' },
+            { name: 'مصارعه', value: '/category/wwe-shows/' }
+        ];
+
+        return [{
+            type_name: "SelectFilter",
+            name: "القسم",
+            state: 0,
+            values: categories.map(c => ({ type_name: "SelectOption", name: c.name, value: c.value }))
+        }];
+    }
 
     getSourcePreferences() {
         return [{
             key: "override_base_url",
             editTextPreference: {
                 title: "Override Base URL",
-                summary: "Use a different mirror/domain for the source",
+                summary: "For temporary changes to the domain.",
                 value: this.source.baseUrl,
                 dialogTitle: "Enter new Base URL",
                 dialogMessage: "Default: " + this.source.baseUrl,
