@@ -176,6 +176,28 @@
         "notes": ""
     },
     {
+        "name": "Asia2TV",
+        "id": 8374928475,
+        "baseUrl": "https://ww1.asia2tv.pw",
+        "lang": "ar",
+        "typeSource": "single",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=ww1.asia2tv.pw",
+        "dateFormat": "",
+        "dateFormatLocale": "",
+        "isNsfw": false,
+        "hasCloudflare": false,
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/asia2tv.js",
+        "apiUrl": "",
+        "version": "1.0.0",
+        "isManga": false,
+        "itemType": 1,
+        "isFullData": false,
+        "appMinVerReq": "0.5.0",
+        "additionalParams": "",
+        "sourceCodeLanguage": 1,
+        "notes": ""
+    },
+    {
         "name": "Cimalek",
         "id": 5798993892749847,
         "baseUrl": "https://cimalek.art",
