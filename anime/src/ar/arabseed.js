@@ -13,6 +13,7 @@ const mangayomiSources = [{
 
 
 
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -115,15 +116,27 @@ class DefaultExtension extends MProvider {
         let res = await this.client.get(url);
         let doc = new Document(res.body);
 
-        // FIX: If the URL is a direct episode link, find the main series page from breadcrumbs and load it.
-        if (url.includes("/%d9%85%d8%b3%d9%84%d8%b3%d9%84-")) { // "مسلسل-"
-            const breadcrumbLinks = doc.select("div.BreadCrumbs ol li a");
-            if (breadcrumbLinks.length > 2) {
-                const seriesPageLink = breadcrumbLinks[breadcrumbLinks.length - 2]?.getHref;
-                if (seriesPageLink && seriesPageLink !== url && !seriesPageLink.includes("/category/")) {
-                    res = await this.client.get(seriesPageLink);
-                    doc = new Document(res.body);
+        // FIX: If the URL is a direct episode or a /selary/ link, find the actual main series page.
+        const isNotMainPage = url.includes("/%d9%85%d8%b3%d9%84%d8%b3%d9%84-") || url.includes("/selary/");
+        if (isNotMainPage) {
+            let seriesPageLink;
+            if (url.includes("/selary/")) {
+                const seasonEl = doc.selectFirst("div.SeasonsListHolder li[data-slug]");
+                const slug = seasonEl?.attr("data-slug");
+                if (slug) {
+                    seriesPageLink = `${this.getBaseUrl()}/${slug}/`;
                 }
+            } else {
+                 const breadcrumbLinks = doc.select("div.BreadCrumbs ol li a");
+                 seriesPageLink = breadcrumbLinks
+                    .map(a => a.getHref)
+                    .reverse()
+                    .find(href => !href.includes("/category/") && !href.endsWith(url.split('/').filter(Boolean).pop() + '/'));
+            }
+
+            if (seriesPageLink) {
+                res = await this.client.get(seriesPageLink);
+                doc = new Document(res.body);
             }
         }
         
@@ -134,8 +147,9 @@ class DefaultExtension extends MProvider {
         const genre = doc.select("li:contains(النوع) > a, li:contains(التصنيف) > a").map(it => it.text.trim());
         
         const chapters = [];
-        const seasonElements = doc.select("div.SeasonsListHolder ul > li");
-        const singleSeasonElements = doc.select("div.ContainerEpisodesList > a");
+        const episodesArea = doc.selectFirst("div.EpisodesArea");
+        const seasonElements = episodesArea?.select("div.SeasonsListHolder ul > li") || [];
+        const singleSeasonElements = episodesArea?.select("div.ContainerEpisodesList > a") || [];
 
         if (seasonElements.length > 0) {
             const episodesUrl = `${this.getBaseUrl()}/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php`;
