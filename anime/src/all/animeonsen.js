@@ -11,6 +11,7 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/all/animeonsen.js"
 }];
 
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -19,7 +20,7 @@ class DefaultExtension extends MProvider {
         this.AO_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0";
         
         // This static token might expire. If the source stops working, it may need to be updated.
-        this.STATIC_BEARER_TOKEN = "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImRlZmF1bHQifQ.eyJpc3MiOiJodHRwczovL2F1dGguYW5pbWVvbnNlbi54eXovIiwiYXVkIjoiaHR0cHM6Ly9hcGkuYW5pbWVvbnNlbi54eXoiLCJpYXQiOjE3NTYxNDY4NTEsImV4cCI6MTc1Njc1MTY1MSwic3ViIjoiMDZkMjJiOTYtNjNlNy00NmE5LTgwZmMtZGM0NDFkNDFjMDM4LmNsaWVudCIsImF6cCI6IjA2ZDIyYjk2LTYzZTctNDZhOS04MGZjLWRjNDQxZDQxYzAzOCIsImd0eSI6ImNsaWVudF9jcmVkZW50aWFscyJ9.VqwRO-FVx6R7qF6l-ZpJqXK45nZJ5ZC1rBDwbZTopEW8pewszwF5QV5RnlxoQVLyVM8DI3jG68w3dq9zgGFSKrAsCR5b_P2Tq8HOUEYxAl5qCTolwDUKQFFBENHeSV7YziXrfpXI-pfHA7Kk32TDP4XzWoCqJqhqQc4fRViu_SUCzcEmBq403Bnll2c_b76ukRa71Mgj0jZsviOy8qlR-bni0N-sHp9STLSHM9vmp7_er4m5p6RzO7DIc0Ax_W_fDu-sxdhpg2XXfGAJ6naFg-TZq0BcFgnb7PqrYbtOy46ehMQS9VdCYJa9rj6JnDPncXtU5rciiLSptaOXvnhEgg";
+        this.STATIC_BEARER_TOKEN = "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImRlZmF1bHQifQ.eyJpc3MiOiJodHRwczovL2F1dGguYW5pbWVvbnNlbi54eXovIiwiYXVkIjoiaHR0cHM6Ly9hcGkuYW5pbWVvbnNlbi54eXoiLCJpYXQiOjE3NTYxNTUyMjksImV4cCI6MTc1Njc2MDAyOSwic3ViIjoiMDZkMjJiOTYtNjNlNy00NmE5LTgwZmMtZGM0NDFkNDFjMDM4LmNsaWVudCIsImF6cCI6IjA2ZDIyYjk2LTYzZTctNDZhOS04MGZjLWRjNDQxZDQxYzAzOCIsImd0eSI6ImNsaWVudF9jcmVkZW50aWFscyJ9.q8sO_RW-u7EX7TTLJoNzVVB02br8DgZJrX4buZ2hAvRnSXOwHYSzqv3uO98bBI-3To1SdpkLSsmlyBj30a-9EqaOxcZ015W3WiAGf8_3_Qw2jHnX2G_OQNy_nEV7YR5LA4FqBgGKTaknKz-Xhq9IGwJf9p6uIQ734U9P9WXX7Bz-Z23l9CbK27MPt_6nz8oAk0R9pxKpe9jtYh45DnBD8MpCy1WqC7zOh_Y-tjLaetWYEA4xr6Upy0rlxnAgENeUmHe4HPfIS5ggy4LouXCs94xlGL8SjoUNTbontMidwHARUR96mz_4LhX8NvCqYq2jrC5VlJr2LzUIpiR0KJO18A";
     }
 
     get supportsLatest() {
@@ -51,8 +52,14 @@ class DefaultExtension extends MProvider {
         return headers;
     }
 
-    // Helper function to parse content lists from API
-    _parseContentList(data) {
+    async getPopular(page) {
+        const limit = 30;
+        const start = (page - 1) * limit;
+        const url = `${this.apiUrl}/content/index?start=${start}&limit=${limit}`;
+
+        const res = await this.client.get(url, this.getHeaders(url));
+        const data = JSON.parse(res.body);
+
         const items = data?.content || [];
         const list = items.map(item => ({
             name: item.content_title || item.content_title_en,
@@ -61,16 +68,6 @@ class DefaultExtension extends MProvider {
         }));
         const hasNextPage = data?.cursor?.next?.[0] === true;
         return { list, hasNextPage };
-    }
-
-    async getPopular(page) {
-        const limit = 30;
-        const start = (page - 1) * limit;
-        const url = `${this.apiUrl}/content/index?start=${start}&limit=${limit}`;
-
-        const res = await this.client.get(url, this.getHeaders(url));
-        const data = JSON.parse(res.body);
-        return this._parseContentList(data);
     }
 
     async getLatestUpdates(page) {
@@ -93,18 +90,17 @@ class DefaultExtension extends MProvider {
     }
 
     async search(query, page, filters) {
-        const genre = filters?.find(f => f.key === "genre")?.value || "";
+        let genre = "";
+        const genreFilter = filters?.find(f => f.name === "Genre");
+        if (genreFilter && genreFilter.state > 0) {
+            genre = genreFilter.values[genreFilter.state].value;
+        }
 
-        // Case 1: Text-based search (ignores filters)
         if (query) {
-            if (page > 1) {
-                return { list: [], hasNextPage: false };
-            }
-            const encodedQuery = encodeURIComponent(query);
-            const url = `${this.apiUrl}/search/${encodedQuery}`;
+            if (page > 1) return { list: [], hasNextPage: false };
+            const url = `${this.apiUrl}/search/${encodeURIComponent(query)}`;
             const res = await this.client.get(url, this.getHeaders(url));
             const data = JSON.parse(res.body);
-
             const items = data?.result || [];
             const list = items.map(item => ({
                 name: item.content_title || item.content_title_en,
@@ -114,17 +110,24 @@ class DefaultExtension extends MProvider {
             return { list, hasNextPage: false };
         }
 
-        // Case 2: Genre-based browsing
         if (genre) {
             const limit = 30;
             const start = (page - 1) * limit;
             const url = `${this.apiUrl}/content/index/genre/${genre}?start=${start}&limit=${limit}`;
             const res = await this.client.get(url, this.getHeaders(url));
             const data = JSON.parse(res.body);
-            return this._parseContentList(data);
+            // FIX: Genre endpoint returns a `result` array, not a `content` array.
+            const items = data?.result || [];
+            const list = items.map(item => ({
+                name: item.content_title || item.content_title_en,
+                link: item.content_id,
+                imageUrl: `${this.apiUrl}/image/210x300/${item.content_id}.webp`
+            }));
+            // FIX: Genre endpoint does not provide a cursor, so infer `hasNextPage`.
+            const hasNextPage = list.length === limit;
+            return { list, hasNextPage };
         }
 
-        // Case 3: No query, no filters -> default to popular
         return this.getPopular(page);
     }
 
@@ -227,79 +230,48 @@ class DefaultExtension extends MProvider {
     }
     
     getFilterList() {
+        const genres = [
+            { name: "Any", value: "" }, { name: "Action", value: "action" },
+            { name: "Adult Cast", value: "adult-cast" }, { name: "Adventure", value: "adventure" },
+            { name: "Anthropomorphic", value: "anthropomorphic" }, { name: "Avant Garde", value: "avant-garde" },
+            { name: "Award Winning", value: "award-winning" }, { name: "Childcare", value: "childcare" },
+            { name: "Combat Sports", value: "combat-sports" }, { name: "Comedy", value: "comedy" },
+            { name: "Cute Girls Doing Cute Things", value: "cgdct" }, { name: "Delinquents", value: "delinquents" },
+            { name: "Detective", value: "detective" }, { name: "Drama", value: "drama" },
+            { name: "Ecchi", value: "ecchi" }, { name: "Fantasy", value: "fantasy" },
+            { name: "Gag Humor", value: "gag-humor" }, { name: "Gore", value: "gore" },
+            { name: "Gourmet", value: "gourmet" }, { name: "Harem", value: "harem" },
+            { name: "High Stakes Game", value: "high-stakes-game" }, { name: "Historical", value: "historical" },
+            { name: "Horror", value: "horror" }, { name: "Idols (Male)", value: "idols-male" },
+            { name: "Isekai", value: "isekai" }, { name: "Iyashikei", value: "iyashikei" },
+            { name: "Love Polygon", value: "love-polygon" }, { name: "Magical Sex Shift", value: "magical-sex-shift" },
+            { name: "Martial Arts", value: "martial-arts" }, { name: "Mecha", value: "mecha" },
+            { name: "Medical", value: "medical" }, { name: "Military", value: "military" },
+            { name: "Music", value: "music" }, { name: "Mystery", value: "mystery" },
+            { name: "Mythology", value: "mythology" }, { name: "Organized Crime", value: "organized-crime" },
+            { name: "Otaku Culture", value: "otaku-culture" }, { name: "Parody", value: "parody" },
+            { name: "Performing Arts", value: "performing-arts" }, { name: "Pets", value: "pets" },
+            { name: "Psychological", value: "psychological" }, { name: "Racing", value: "racing" },
+            { name: "Reincarnation", value: "reincarnation" }, { name: "Reverse Harem", value: "reverse-harem" },
+            { name: "Romance", value: "romance" }, { name: "Romantic Subtext", value: "romantic-subtext" },
+            { name: "Samurai", value: "samurai" }, { name: "School", value: "school" },
+            { name: "Sci-Fi", value: "sci-fi" }, { name: "Seinen", value: "seinen" },
+            { name: "Shoujo", value: "shoujo" }, { name: "Shoujo Ai", value: "shoujo-ai" },
+            { name: "Shounen", value: "shounen" }, { name: "Slice of Life", value: "slice-of-life" },
+            { name: "Space", value: "space" }, { name: "Sports", value: "sports" },
+            { name: "Strategy Game", value: "strategy-game" }, { name: "Super Power", value: "super-power" },
+            { name: "Supernatural", value: "supernatural" }, { name: "Survival", value: "survival" },
+            { name: "Suspense", value: "suspense" }, { name: "Team Sports", value: "team-sports" },
+            { name: "Time Travel", value: "time-travel" }, { name: "Vampire", value: "vampire" },
+            { name: "Video Game", value: "video-game" }, { name: "Visual Arts", value: "visual-arts" },
+            { name: "Workplace", value: "workplace" }
+        ];
+
         return [{
-            type: "SelectFilter",
-            key: "genre",
-            displayName: "Genre",
-            options: [
-                { name: "Any", value: "" },
-                { name: "Action", value: "action" },
-                { name: "Adult Cast", value: "adult-cast" },
-                { name: "Adventure", value: "adventure" },
-                { name: "Anthropomorphic", value: "anthropomorphic" },
-                { name: "Avant Garde", value: "avant-garde" },
-                { name: "Award Winning", value: "award-winning" },
-                { name: "Childcare", value: "childcare" },
-                { name: "Combat Sports", value: "combat-sports" },
-                { name: "Comedy", value: "comedy" },
-                { name: "Cute Girls Doing Cute Things", value: "cgdct" },
-                { name: "Delinquents", value: "delinquents" },
-                { name: "Detective", value: "detective" },
-                { name: "Drama", value: "drama" },
-                { name: "Ecchi", value: "ecchi" },
-                { name: "Fantasy", value: "fantasy" },
-                { name: "Gag Humor", value: "gag-humor" },
-                { name: "Gore", value: "gore" },
-                { name: "Gourmet", value: "gourmet" },
-                { name: "Harem", value: "harem" },
-                { name: "High Stakes Game", value: "high-stakes-game" },
-                { name: "Historical", value: "historical" },
-                { name: "Horror", value: "horror" },
-                { name: "Idols (Male)", value: "idols-male" },
-                { name: "Isekai", value: "isekai" },
-                { name: "Iyashikei", value: "iyashikei" },
-                { name: "Love Polygon", value: "love-polygon" },
-                { name: "Magical Sex Shift", value: "magical-sex-shift" },
-                { name: "Martial Arts", value: "martial-arts" },
-                { name: "Mecha", value: "mecha" },
-                { name: "Medical", value: "medical" },
-                { name: "Military", value: "military" },
-                { name: "Music", value: "music" },
-                { name: "Mystery", value: "mystery" },
-                { name: "Mythology", value: "mythology" },
-                { name: "Organized Crime", value: "organized-crime" },
-                { name: "Otaku Culture", value: "otaku-culture" },
-                { name: "Parody", value: "parody" },
-                { name: "Performing Arts", value: "performing-arts" },
-                { name: "Pets", value: "pets" },
-                { name: "Psychological", value: "psychological" },
-                { name: "Racing", value: "racing" },
-                { name: "Reincarnation", value: "reincarnation" },
-                { name: "Reverse Harem", value: "reverse-harem" },
-                { name: "Romance", value: "romance" },
-                { name: "Romantic Subtext", value: "romantic-subtext" },
-                { name: "Samurai", value: "samurai" },
-                { name: "School", value: "school" },
-                { name: "Sci-Fi", value: "sci-fi" },
-                { name: "Seinen", value: "seinen" },
-                { name: "Shoujo", value: "shoujo" },
-                { name: "Shoujo Ai", value: "shoujo-ai" },
-                { name: "Shounen", value: "shounen" },
-                { name: "Slice of Life", value: "slice-of-life" },
-                { name: "Space", value: "space" },
-                { name: "Sports", value: "sports" },
-                { name: "Strategy Game", value: "strategy-game" },
-                { name: "Super Power", value: "super-power" },
-                { name: "Supernatural", value: "supernatural" },
-                { name: "Survival", value: "survival" },
-                { name: "Suspense", value: "suspense" },
-                { name: "Team Sports", value: "team-sports" },
-                { name: "Time Travel", value: "time-travel" },
-                { name: "Vampire", value: "vampire" },
-                { name: "Video Game", value: "video-game" },
-                { name: "Visual Arts", value: "visual-arts" },
-                { name: "Workplace", value: "workplace" }
-            ]
+            type_name: "SelectFilter",
+            name: "Genre",
+            state: 0,
+            values: genres.map(g => ({ type_name: "SelectOption", name: g.name, value: g.value }))
         }];
     }
     
@@ -309,7 +281,7 @@ class DefaultExtension extends MProvider {
             switchPreferenceCompat: {
                 title: "Enable 'Latest' Tab",
                 summary: "Toggles the visibility of the 'Latest' tab.",
-                value: true,
+                value: false,
             }
         }, {
             key: "override_base_url",
@@ -325,7 +297,7 @@ class DefaultExtension extends MProvider {
             switchPreferenceCompat: {
                 title: "Enable Stream Quality Extraction",
                 summary: "If a stream provides multiple qualities, this will list them. (e.g. 1080p, 720p)",
-                value: true,
+                value: false,
             }
         }];
     }
