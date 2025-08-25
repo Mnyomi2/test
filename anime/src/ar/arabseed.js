@@ -12,8 +12,6 @@ const mangayomiSources = [{
 }];
 
 
-
-
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -113,75 +111,89 @@ class DefaultExtension extends MProvider {
 
     // --- DETAILS ---
     async getDetail(url) {
-        let res = await this.client.get(url);
-        let doc = new Document(res.body);
+        const initialUrl = url;
+        const res = await this.client.get(url);
+        const doc = new Document(res.body);
+        
+        const name = (doc.selectFirst("div.BreadCrumbs ol li:last-child a span")?.text || doc.selectFirst("h1.Title")?.text || "")
+            .replace(/مترجم|فيلم|مسلسل/g, "").trim();
 
-        // FIX: If the URL is a direct episode or a /selary/ link, find the actual main series page.
-        const isNotMainPage = url.includes("/%d9%85%d8%b3%d9%84%d8%b3%d9%84-") || url.includes("/selary/");
-        if (isNotMainPage) {
-            let seriesPageLink;
-            if (url.includes("/selary/")) {
-                const seasonEl = doc.selectFirst("div.SeasonsListHolder li[data-slug]");
-                const slug = seasonEl?.attr("data-slug");
-                if (slug) {
-                    seriesPageLink = `${this.getBaseUrl()}/${slug}/`;
-                }
+        const posterElement = doc.selectFirst("div.Poster > img");
+        const imageUrl = posterElement?.attr("data-src") || posterElement?.attr("data-lazy-src") || posterElement?.getSrc || "";
+        
+        const description = doc.selectFirst("meta[name='keywords']")?.attr("content")?.trim() ||
+                            doc.selectFirst("p.descrip:nth-of-type(2)")?.text?.trim() ||
+                            doc.selectFirst("p.descrip")?.text?.trim() ||
+                            "لا يوجد وصف متاح لهذا العرض.";
+
+        // ✅ استخراج جميع البيانات من div.MetaTermsInfo
+        // Use a more general selector ('li' instead of '> li') to be robust against minor HTML changes.
+        const metaTerms = doc.select("div.MetaTermsInfo li");
+        const metaMap = {};
+
+        for (const li of metaTerms) {
+            const label = li.selectFirst("span")?.text?.trim();
+            // Skip list items that don't have a label span (e.g., separators).
+            if (!label) continue;
+
+            const key = label.replace(/:$/, "").trim();
+            const links = li.select("a");
+
+            if (links.length > 0) {
+                // If <a> tags exist, their text content represents the value(s).
+                metaMap[key] = links.map(a => a.text.trim());
             } else {
-                 const breadcrumbLinks = doc.select("div.BreadCrumbs ol li a");
-                 seriesPageLink = breadcrumbLinks
-                    .map(a => a.getHref)
-                    .reverse()
-                    .find(href => !href.includes("/category/") && !href.endsWith(url.split('/').filter(Boolean).pop() + '/'));
-            }
-
-            if (seriesPageLink) {
-                res = await this.client.get(seriesPageLink);
-                doc = new Document(res.body);
+                // If no <a> tags, the value is plain text (e.g., release date).
+                // Isolate it by taking the full text of the <li> and removing the label part.
+                const value = li.text.replace(label, "").trim();
+                if (value) {
+                    metaMap[key] = [value];
+                }
             }
         }
-        
-        const name = doc.selectFirst("h1.Title")?.text || doc.selectFirst("div.Title")?.text || "";
-        const posterElement = doc.selectFirst("div.Poster > img");
-        const imageUrl = posterElement?.attr("data-src") || posterElement?.attr("src") || "";
-        const description = doc.select("p.descrip").last?.text || "";
-        const genre = doc.select("li:contains(النوع) > a, li:contains(التصنيف) > a").map(it => it.text.trim());
-        
-        const chapters = [];
-        const episodesArea = doc.selectFirst("div.EpisodesArea");
-        const seasonElements = episodesArea?.select("div.SeasonsListHolder ul > li") || [];
-        const singleSeasonElements = episodesArea?.select("div.ContainerEpisodesList > a") || [];
 
-        if (seasonElements.length > 0) {
-            const episodesUrl = `${this.getBaseUrl()}/wp-content/themes/Elshaikh2021/Ajaxat/Single/Episodes.php`;
-            const episodePromises = seasonElements.map(async (seasonEl) => {
-                const season = seasonEl.attr("data-season");
-                const postId = seasonEl.attr("data-id");
-                const seasonNum = this.getIntFromText(seasonEl.text) || 1;
-                try {
-                    const res = await this.client.post(episodesUrl, {}, { season, post_id: postId });
-                    const epsDoc = new Document(res.body);
-                    return epsDoc.select("a").map(epEl => {
-                        const epNumStr = epEl.selectFirst("em")?.text.trim();
-                        if (!epNumStr) return null;
-                        return { name: `الموسم ${seasonNum} - الحلقة ${epNumStr}`, url: epEl.getHref, season: seasonNum, episode: this.getIntFromText(epNumStr) };
-                    }).filter(Boolean);
-                } catch { return []; }
-            });
-            const allEpisodes = (await Promise.all(episodePromises)).flat();
-            chapters.push(...allEpisodes);
-        } else if (singleSeasonElements.length > 0) {
-            singleSeasonElements.forEach(epEl => {
-                const epNumStr = epEl.selectFirst("em")?.text.trim();
+        // ✅ تحويل البيانات إلى حقول موحدة
+        const genre = metaMap["النوع"] || [];
+        const year = metaMap["السنه"]?.[0] || "";
+        const language = metaMap["اللغة"] || [];
+        const quality = metaMap["الجودة"]?.[0] || "";
+        const country = metaMap["الدولة"]?.[0] || "";
+        const releaseDate = metaMap["اليوم"]?.[0] || "";
+
+        // ✅ فصل الحلقات
+        const chapters = [];
+        const episodeElements = doc.select("div.ContainerEpisodesList a");
+
+        if (episodeElements.length > 0) {
+            episodeElements.forEach(epEl => {
+                const epNumStr = epEl.selectFirst("em")?.text?.trim();
                 if (epNumStr) {
-                    chapters.push({ name: `الحلقة ${epNumStr}`, url: epEl.getHref, season: 1, episode: this.getIntFromText(epNumStr) });
+                    chapters.push({
+                        name: `الحلقة ${epNumStr}`,
+                        url: epEl.getHref,
+                        episode: parseFloat(epNumStr),
+                    });
                 }
             });
         } else {
-            chapters.push({ name: "مشاهدة", url });
+            chapters.push({ name: "مشاهدة", url: initialUrl });
         }
-        
-        chapters.sort((a, b) => (a.season - b.season) || (a.episode - b.episode));
-        return { name, imageUrl, description, genre, chapters };
+
+        // ✅ إرجاع جميع البيانات
+        return {
+            name,
+            imageUrl,
+            description,
+            genre,
+            extraInfo: {
+                year,
+                language: language.join(", "),
+                quality,
+                country,
+                releaseDate
+            },
+            chapters
+        };
     }
 
     // --- VIDEO ---
@@ -196,36 +208,31 @@ class DefaultExtension extends MProvider {
         const watchDoc = new Document(watchRes.body);
 
         const videos = [];
-        let currentQuality = "Auto";
+        
+        for (const element of watchDoc.select("div.containerServers ul li")) {
+            const quality = element.text;
+            const iframeUrl = element.attr("data-link");
 
-        for (const element of watchDoc.select("ul > li[data-link], ul > h3")) {
-            if (element.tagName === "h3") {
-                currentQuality = element.text;
-            } else {
-                const iframeUrl = element.attr("data-link");
-                const serverName = element.text;
-
-                if (serverName.includes("عرب سيد")) {
-                    try {
-                        const iframeRes = await this.client.get(iframeUrl);
-                        const iframeDoc = new Document(iframeRes.body);
-                        const sourceElement = iframeDoc.selectFirst("source");
-                        if (sourceElement) {
-                            videos.push({
-                                url: sourceElement.attr("src"),
-                                quality: `${serverName} - ${currentQuality}`,
-                                originalUrl: sourceElement.attr("src"),
-                                headers: { "Referer": iframeUrl }
-                            });
-                        }
-                    } catch (e) {
-                        console.log(`Failed to extract from ${iframeUrl}: ${e}`);
+            if (iframeUrl.includes("reviewtech") || iframeUrl.includes("reviewrate")) {
+                try {
+                    const iframeRes = await this.client.get(iframeUrl);
+                    const iframeDoc = new Document(iframeRes.body);
+                    const sourceUrl = iframeDoc.selectFirst("source")?.attr("src");
+                    if (sourceUrl) {
+                        videos.push({
+                            url: sourceUrl,
+                            quality: quality,
+                            originalUrl: sourceUrl,
+                            headers: { "Referer": iframeUrl }
+                        });
                     }
+                } catch (e) {
+                    console.log(`Failed to extract from ${iframeUrl}: ${e}`);
                 }
             }
         }
         
-        if (videos.length === 0) throw new Error("No direct 'ArabSeed' servers found.");
+        if (videos.length === 0) throw new Error("No compatible servers found.");
         return videos;
     }
     
