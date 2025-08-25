@@ -11,6 +11,7 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/asia2tv.js"
 }];
 
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -39,12 +40,17 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
 
         const list = [];
-        const items = doc.select("div.postmovie-photo a[title]");
+        // FIXED: Select the parent container to access both link and image
+        const items = doc.select("div.postmovie-photo");
         for (const item of items) {
-            const link = item.getHref.replace(this.source.baseUrl, "");
-            const name = item.attr("title");
-            // Thumbnail is fetched in getDetail
-            list.push({ name, link });
+            const linkElement = item.selectFirst("a[title]");
+            if (!linkElement) continue;
+
+            const link = linkElement.getHref.replace(this.source.baseUrl, "");
+            const name = linkElement.attr("title");
+            const imageUrl = item.selectFirst("div.image img")?.getSrc;
+
+            list.push({ name, link, imageUrl });
         }
 
         const hasNextPage = doc.selectFirst("div.nav-links a.next") != null;
@@ -53,8 +59,6 @@ class DefaultExtension extends MProvider {
 
     // --- LATEST ---
 
-    // The source doesn't have a clear, paginated latest episode list.
-    // getPopular serves a similar purpose (recently added dramas).
     get supportsLatest() {
         return false;
     }
@@ -91,11 +95,17 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
         
         const list = [];
-        const items = doc.select("div.postmovie-photo a[title]");
+        // FIXED: Select the parent container to access both link and image
+        const items = doc.select("div.postmovie-photo");
         for (const item of items) {
-            const link = item.getHref.replace(this.source.baseUrl, "");
-            const name = item.attr("title");
-            list.push({ name, link });
+            const linkElement = item.selectFirst("a[title]");
+            if (!linkElement) continue;
+
+            const link = linkElement.getHref.replace(this.source.baseUrl, "");
+            const name = linkElement.attr("title");
+            const imageUrl = item.selectFirst("div.image img")?.getSrc;
+            
+            list.push({ name, link, imageUrl });
         }
         
         const hasNextPage = doc.selectFirst("div.nav-links a.next") != null;
@@ -145,7 +155,6 @@ class DefaultExtension extends MProvider {
     }
 
     async getVideoList(url) {
-        // This source has a two-step process to get to the server page.
         const initialRes = await this.client.get(this.source.baseUrl + url, this.getHeaders(this.source.baseUrl + url));
         const initialDoc = new Document(initialRes.body);
         const serverPageUrl = initialDoc.selectFirst("div.loop-episode a.current")?.getHref;
@@ -193,7 +202,7 @@ class DefaultExtension extends MProvider {
                 const bIsPreferred = b.quality.includes(quality);
                 if (aIsPreferred && !bIsPreferred) return -1;
                 if (!aIsPreferred && bIsPreferred) return 1;
-                return 0; // Keep original order for same-level priorities
+                return 0;
             });
         }
         return videos;
@@ -233,7 +242,7 @@ class DefaultExtension extends MProvider {
             listPreference: {
                 title: "الجودة والسيرفر المفضل",
                 summary: "اختر الجودة أو السيرفر الذي سيظهر في الأعلى",
-                valueIndex: 2, // Default to 1080p
+                valueIndex: 2,
                 entries: ["StreamTape", "DoodStream", "1080p", "720p", "480p", "360p"],
                 entryValues: ["StreamTape", "Dood", "1080", "720", "480", "360"],
             }
