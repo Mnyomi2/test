@@ -167,7 +167,7 @@ class DefaultExtension extends MProvider {
                 const embedUrl = element.attr("data-server");
                 const serverName = element.text.trim();
                 let extractedVideos = [];
-                const genericVideo = { url: embedUrl, quality: `${serverName}\n${embedUrl}`, headers: this._getVideoHeaders(embedUrl) };
+                const genericVideo = { url: embedUrl, quality: `${serverName} - ${embedUrl}`, headers: this._getVideoHeaders(embedUrl) };
 
                 const streamwish_domains = ["streamwish", "filelions", "iplayerhls", "dhtpre", "mivalyo", "hglink", "haxloppd", "vidhidepro", "vidhideplus", "do7go", "playerwish", "sfastwish"];
                 const dood_domains = ["dood", "ds2play", "dooodster", "d000d", "d-s.io"];
@@ -219,7 +219,7 @@ class DefaultExtension extends MProvider {
     
     async _parseM3U8(playlistUrl, prefix, headers = {}) {
         const videos = [];
-        videos.push({ url: playlistUrl, originalUrl: playlistUrl, quality: `${prefix} Auto (HLS)\n${playlistUrl}`, headers });
+        videos.push({ url: playlistUrl, originalUrl: playlistUrl, quality: `${prefix} Auto (HLS) - ${playlistUrl}`, headers });
 
         if (!this.getPreference("extract_qualities")) {
             return videos;
@@ -247,7 +247,7 @@ class DefaultExtension extends MProvider {
                         videoUrl = baseUrl + videoUrl;
                     }
                     if(videoUrl) {
-                        videos.push({ url: videoUrl, originalUrl: videoUrl, quality: `${prefix} ${quality}\n${videoUrl}`, headers });
+                        videos.push({ url: videoUrl, originalUrl: videoUrl, quality: `${prefix} ${quality} - ${videoUrl}`, headers });
                     }
                 }
             }
@@ -269,16 +269,49 @@ class DefaultExtension extends MProvider {
             const json = JSON.parse(dataOptions.replace(/&quot;/g, '"'));
             const metadata = JSON.parse(json.flashvars.metadata);
             
+            const videos = [];
+
+            const getQualityName = (name) => {
+                switch (name) {
+                    case "full": return "1080p";
+                    case "hd": return "720p";
+                    case "sd": return "480p";
+                    case "low": return "360p";
+                    case "lowest": return "240p";
+                    case "mobile": return "144p";
+                    default: return name;
+                }
+            };
+            
+            if (metadata.videos) {
+                const directVideos = metadata.videos.map(video => {
+                    const quality = getQualityName(video.name);
+                    return {
+                        url: video.url,
+                        originalUrl: video.url,
+                        quality: `${prefix} ${quality} - ${video.url}`,
+                        headers: videoHeaders
+                    };
+                });
+                videos.push(...directVideos);
+            }
+
             if (metadata.hlsManifestUrl) {
-                return this._parseM3U8(metadata.hlsManifestUrl, prefix, videoHeaders);
+                videos.unshift({
+                    url: metadata.hlsManifestUrl,
+                    originalUrl: metadata.hlsManifestUrl,
+                    quality: `${prefix} Auto (HLS) - ${metadata.hlsManifestUrl}`,
+                    headers: videoHeaders
+                });
+            }
+
+            if (videos.length > 1) {
+                const autoOption = videos.shift();
+                videos.reverse();
+                videos.unshift(autoOption);
             }
             
-            return metadata.videos.map(video => ({
-                url: video.url,
-                originalUrl: video.url,
-                quality: `${prefix} ${video.name}\n${video.url}`,
-                headers: videoHeaders
-            })).reverse();
+            return videos;
         } catch (e) { 
             return []; 
         }
@@ -293,7 +326,7 @@ class DefaultExtension extends MProvider {
         const videoUrlPart2 = script.substringAfter("+ ('xcd").substringBefore("'");
         const finalUrl = "https:" + videoUrlPart1 + videoUrlPart2;
         
-        return [{ url: finalUrl, quality: `${quality}\n${finalUrl}`, originalUrl: finalUrl, headers: this._getVideoHeaders(url) }];
+        return [{ url: finalUrl, quality: `${quality} - ${finalUrl}`, originalUrl: finalUrl, headers: this._getVideoHeaders(url) }];
     }
     
     async _streamwishExtractor(url, prefix = "StreamWish") {
@@ -315,10 +348,10 @@ class DefaultExtension extends MProvider {
 
         const videoUrl = script.replace(/"/g, '');
         if (!videoUrl.startsWith("http")) return [];
-
+        
         return [{ 
             url: videoUrl, 
-            quality: `${prefix}\n${videoUrl}`, 
+            quality: `${prefix} - ${videoUrl}`, 
             originalUrl: videoUrl, 
             headers: this._getVideoHeaders("https://uqload.to/") 
         }];
@@ -335,7 +368,7 @@ class DefaultExtension extends MProvider {
         return sources.map(source => {
             const src = source.substringBefore('"');
             const qualityLabel = "Vidbom/VidShare: " + source.substringAfter('label:"').substringBefore('"');
-            return { url: src, quality: `${qualityLabel}\n${src}`, originalUrl: src, headers: videoHeaders };
+            return { url: src, quality: `${qualityLabel} - ${src}`, originalUrl: src, headers: videoHeaders };
         });
     }
 
@@ -345,7 +378,7 @@ class DefaultExtension extends MProvider {
             const doc = new Document(res.body);
             const videoUrl = doc.selectFirst("source")?.getSrc;
             if (videoUrl) {
-                return [{ url: videoUrl, quality: `Yodbox\n${videoUrl}`, originalUrl: videoUrl, headers: this._getVideoHeaders(url) }];
+                return [{ url: videoUrl, quality: `Yodbox - ${videoUrl}`, originalUrl: videoUrl, headers: this._getVideoHeaders(url) }];
             }
         } catch (e) { /* Do nothing */ }
         return [];
@@ -405,9 +438,9 @@ class DefaultExtension extends MProvider {
         const matches = [...body.matchAll(regex)];
         
         return matches.map(match => {
-            const quality = match[1] + "p";
+            const qualityLabel = match[1] + "p";
             const videoUrl = match[2].replace(/\\/g, '');
-            return { url: videoUrl, originalUrl: videoUrl, quality: `${prefix} ${quality}\n${videoUrl}`, headers: videoHeaders };
+            return { url: videoUrl, originalUrl: videoUrl, quality: `${prefix} ${qualityLabel} - ${videoUrl}`, headers: videoHeaders };
         });
     }
 
@@ -419,7 +452,7 @@ class DefaultExtension extends MProvider {
         const unpacked = unpackJs(script);
         const videoUrl = "https:" + unpacked.match(/MDCore\.wurl="([^"]+)"/)?.[1];
         if (!videoUrl) return [];
-        return [{ url: videoUrl, quality: `${prefix}\n${videoUrl}`, originalUrl: videoUrl, headers: this._getVideoHeaders(url) }];
+        return [{ url: videoUrl, quality: `${prefix} - ${videoUrl}`, originalUrl: videoUrl, headers: this._getVideoHeaders(url) }];
     }
 
     async _streamrubyExtractor(url, prefix = "StreamRuby") {
