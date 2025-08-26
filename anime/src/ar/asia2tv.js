@@ -12,7 +12,6 @@ const mangayomiSources = [{
 }];
 
 
-
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -270,38 +269,25 @@ class DefaultExtension extends MProvider {
     }
 
     async _okruExtractor(url, prefix = "Okru") {
-        const okruHeaders = { "Referer": url, "User-Agent": this.getHeaders().UserAgent };
+        const okruVideoHeaders = { "Referer": "https://ok.ru/", "Origin": "https://ok.ru" };
         const res = await this.client.get(url, this.getHeaders(url));
-        
-        // Find the JSON data in the HTML
-        const data = res.body.substringAfter("data-options=\"").substringBefore("\"");
-        if (!data) {
-             const dataFromScript = res.body.substringAfter("OK.VideoPlayer.create(").substringBefore(");");
-             if (dataFromScript) {
-                 const metadata = JSON.parse(JSON.parse(dataFromScript).flashvars.metadata);
-                 if (metadata.hlsManifestUrl) {
-                    const hlsContent = (await this.client.get(metadata.hlsManifestUrl, okruHeaders)).body;
-                    return this._parseM3U8(hlsContent, metadata.hlsManifestUrl, prefix, okruHeaders);
-                 }
-                 return metadata.videos.map(v => ({ url: v.url, quality: `${prefix} ${v.name}`, originalUrl: v.url, headers: okruHeaders })).reverse();
-             }
-             return [];
-        }
+        const dataOptions = res.body.substringAfter("data-options=\"").substringBefore("\"");
+        if (!dataOptions) return [];
 
         try {
-            const json = JSON.parse(data.replace(/&quot;/g, '"'));
+            const json = JSON.parse(dataOptions.replace(/&quot;/g, '"'));
             const metadata = JSON.parse(json.flashvars.metadata);
             
             if (metadata.hlsManifestUrl) {
-                const hlsContent = (await this.client.get(metadata.hlsManifestUrl, okruHeaders)).body;
-                return this._parseM3U8(hlsContent, metadata.hlsManifestUrl, prefix, okruHeaders);
+                const hlsContent = (await this.client.get(metadata.hlsManifestUrl, { "Referer": url })).body;
+                return this._parseM3U8(hlsContent, metadata.hlsManifestUrl, prefix, okruVideoHeaders);
             }
             
             return metadata.videos.map(video => ({
                 url: video.url,
                 originalUrl: video.url,
                 quality: `${prefix} ${video.name}`,
-                headers: okruHeaders
+                headers: okruVideoHeaders
             })).reverse();
         } catch (e) { return []; }
     }
