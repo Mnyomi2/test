@@ -359,15 +359,27 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(url, this.getHeaders(url));
         const script = res.body.substringAfter("sources: [").substringBefore("]");
         if (!script) return [];
-        
+
         const videoHeaders = this._getVideoHeaders(url);
         const sources = script.split('{file:"').slice(1);
         
-        return sources.map(source => {
+        let allVideos = [];
+        for (const source of sources) {
             const src = source.substringBefore('"');
-            const qualityLabel = "VidShare: " + source.substringAfter('label:"').substringBefore('"');
-            return { url: src, quality: this._formatQuality(qualityLabel, src), originalUrl: src, headers: videoHeaders };
-        });
+            if (src.includes(".m3u8")) {
+                const hlsVideos = await this._parseM3U8(src, "VidShare", videoHeaders);
+                allVideos.push(...hlsVideos);
+            } else {
+                const qualityLabel = "VidShare: " + source.substringAfter('label:"').substringBefore('"');
+                allVideos.push({
+                    url: src,
+                    originalUrl: src,
+                    quality: this._formatQuality(qualityLabel, src),
+                    headers: videoHeaders
+                });
+            }
+        }
+        return allVideos;
     }
 
     async _yodboxExtractor(url) {
@@ -403,8 +415,6 @@ class DefaultExtension extends MProvider {
         const videoHeaders = { ...this._getVideoHeaders(url), "Origin": `https://${new URL(url).hostname}` };
         const res = await this.client.get(url, videoHeaders);
         
-        // Filemoon now has two eval blocks. The first is a decoy.
-        // The real one is after the jwplayer key.
         const playerScript = res.body.substringAfter('jwplayer.key=');
         const jsEval = playerScript.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
         if (!jsEval) return [];
