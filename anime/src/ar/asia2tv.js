@@ -206,6 +206,17 @@ class DefaultExtension extends MProvider {
         }
 
         if (videos.length === 0) throw new Error("No videos found from any of your enabled servers.");
+
+        // --- START OF MODIFICATION FOR TESTING ---
+        console.log("--- Extracted Video Links for Testing ---");
+        videos.forEach((video, index) => {
+            console.log(`[${index + 1}] Quality: ${video.quality}`);
+            console.log(`    URL: ${video.url}`);
+            console.log(`    Headers: ${JSON.stringify(video.headers || {})}`);
+        });
+        console.log("-----------------------------------------");
+        // --- END OF MODIFICATION FOR TESTING ---
+
         return videos;
     }
     
@@ -253,15 +264,10 @@ class DefaultExtension extends MProvider {
     }
 
     async _okruExtractor(url, prefix = "Okru") {
-        // Initial request to the embed page. Default headers are fine here.
         const res = await this.client.get(url, this.getHeaders(url));
-        
-        // Extract the JSON data containing video metadata.
         const dataOptions = res.body.substringAfter("data-options=\"").substringBefore("\"");
         if (!dataOptions) return [];
 
-        // **FIX:** These are the correct headers required by the video host (e.g., vkuser.net)
-        // to authorize playback. The Referer must be the base ok.ru domain.
         const videoHeaders = {
             "Referer": "https://ok.ru/",
             "Origin": "https://ok.ru",
@@ -269,24 +275,20 @@ class DefaultExtension extends MProvider {
         };
 
         try {
-            // Parse the JSON data to get video links.
             const json = JSON.parse(dataOptions.replace(/&quot;/g, '"'));
             const metadata = JSON.parse(json.flashvars.metadata);
             
-            // If an HLS manifest is available, parse it for different qualities.
             if (metadata.hlsManifestUrl) {
                 return this._parseM3U8(metadata.hlsManifestUrl, prefix, videoHeaders);
             }
             
-            // Otherwise, process the list of direct MP4 links.
             return metadata.videos.map(video => ({
                 url: video.url,
                 originalUrl: video.url,
                 quality: `${prefix} ${video.name}`,
-                headers: videoHeaders // Apply the corrected headers to each video link.
+                headers: videoHeaders
             })).reverse();
         } catch (e) { 
-            // If parsing fails, return an empty array to avoid crashing.
             return []; 
         }
     }
