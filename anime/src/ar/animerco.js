@@ -27,11 +27,10 @@ class DefaultExtension extends MProvider {
     getBaseUrl() {
         return this.getPreference("override_base_url") || this.source.baseUrl;
     }
-
+    
     getHeaders(url) {
-        // Standard headers for fetching HTML pages
         return {
-            "Referer": this.getBaseUrl() + "/",
+            "Referer": url,
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         };
     }
@@ -47,7 +46,7 @@ class DefaultExtension extends MProvider {
 
     async getPopular(page) {
         const url = `${this.getBaseUrl()}/seasons/page/${page}/`;
-        const res = await this.client.get(url, this.getHeaders(url));
+        const res = await this.client.get(url, this.getHeaders(this.getBaseUrl() + "/"));
         const doc = new Document(res.body, res.url);
         const list = [];
         for (const item of doc.select("div.box-5x1.media-block")) {
@@ -62,7 +61,7 @@ class DefaultExtension extends MProvider {
 
     async getLatestUpdates(page) {
         const url = `${this.getBaseUrl()}/episodes/page/${page}/`;
-        const res = await this.client.get(url, this.getHeaders(url));
+        const res = await this.client.get(url, this.getHeaders(this.getBaseUrl() + "/"));
         const doc = new Document(res.body, res.url);
         const list = [];
         for (const item of doc.select("div.media-block, div.pinned-card")) {
@@ -85,7 +84,7 @@ class DefaultExtension extends MProvider {
 
     async search(query, page, filters) {
         const url = `${this.getBaseUrl()}/page/${page}/?s=${encodeURIComponent(query)}`;
-        const res = await this.client.get(url, this.getHeaders(url));
+        const res = await this.client.get(url, this.getHeaders(this.getBaseUrl() + "/"));
         const doc = new Document(res.body, res.url);
         const list = [];
         for (const item of doc.select("div.box-5x1.media-block")) {
@@ -100,25 +99,21 @@ class DefaultExtension extends MProvider {
 
     async getDetail(url) {
         const fullUrl = this.getBaseUrl() + url;
-        const res = await this.client.get(fullUrl, this.getHeaders(fullUrl));
+        const res = await this.client.get(fullUrl, this.getHeaders(this.getBaseUrl() + "/"));
         const doc = new Document(res.body, res.url);
-
         let name = doc.selectFirst("div.media-title > h1")?.text?.replace(/\s+(season|الموسم)\s+\d+\s*$/i, '').trim();
         const imageUrl = doc.selectFirst("div.anime-card.player a.image")?.attr("data-src");
         let description = doc.selectFirst("div.media-story div.content p")?.text ?? "";
         const altTitle = doc.selectFirst("div.media-title h3")?.text;
         if (altTitle) description += `\n\nAlternative title: ${altTitle?.trim() ?? ''}`;
-        
         let status = 5;
         const statusText = doc.selectFirst("div.status > a")?.text;
         if (statusText) {
             if (statusText.includes("يعرض الأن")) status = 0;
             else if (statusText.includes("مكتمل")) status = 1;
         }
-
         const genre = doc.select("div.genres a").map(e => e.text);
         const chapters = [];
-        
         if (doc.location?.includes("/movies/")) {
             chapters.push({ name: "Movie", url: url, scanlator: "1" });
         } else {
@@ -136,12 +131,12 @@ class DefaultExtension extends MProvider {
                 }
             }
         }
-        
         chapters.sort((a, b) => parseFloat(b.scanlator) - parseFloat(a.scanlator));
         return { name, imageUrl, description, link: url, status, genre, chapters };
     }
 
     async getVideoList(url) {
+        console.log(`Starting getVideoList for: ${url}`);
         const fullUrl = this.getBaseUrl() + url;
         const res = await this.client.get(fullUrl, this.getHeaders(fullUrl));
         const doc = new Document(res.body, res.url);
@@ -149,25 +144,42 @@ class DefaultExtension extends MProvider {
         const hosterSelection = this.getPreference("hoster_selection") || [];
         const downloadLinks = doc.select("div#download tbody tr");
         
+        console.log(`Found ${downloadLinks.length} download link rows.`);
         if (downloadLinks.length === 0) {
             throw new Error("No download links section found on the page.");
         }
 
-        const promises = downloadLinks.map(async (row) => {
+        const promises = downloadLinks.map(async (row, index) => {
+            const logPrefix = `[Link ${index + 1}]`;
             try {
                 const linkUrl = row.selectFirst("a")?.attr("href");
-                if (!linkUrl) return [];
+                if (!linkUrl) {
+                    console.log(`${logPrefix} Could not find intermediate link URL.`);
+                    return [];
+                }
+                console.log(`${logPrefix} Intermediate link URL: ${linkUrl}`);
 
-                const linkPageRes = await this.client.get(linkUrl, this.getHeaders(linkUrl));
+                const intermediatePageHeaders = this.getHeaders(fullUrl);
+                const linkPageRes = await this.client.get(linkUrl, intermediatePageHeaders);
+                console.log(`${logPrefix} Fetched intermediate page.`);
+
                 const encodedUrl = new Document(linkPageRes.body).selectFirst("a#link[data-url]")?.attr("data-url");
-                if (!encodedUrl) return [];
+                if (!encodedUrl) {
+                    console.log(`${logPrefix} Could not find Base64 data-url on intermediate page.`);
+                    return [];
+                }
+                console.log(`${logPrefix} Found encoded URL: ${encodedUrl}`);
 
                 const decodedUrl = new MBuffer(encodedUrl, "base64").toString();
+                console.log(`${logPrefix} Decoded URL: ${decodedUrl}`);
+                
                 const serverDomain = row.selectFirst("div.favicon")?.attr("data-src")?.match(/domain=([^&]+)/)?.[1] || "Download";
                 const quality = row.selectFirst("strong.badge")?.text?.trim() || serverDomain;
+                console.log(`${logPrefix} Server/Quality: ${quality}`);
                 
                 return this._extractVideosFromUrl(decodedUrl, quality, hosterSelection);
             } catch (e) {
+                console.error(`${logPrefix} An error occurred: ${e.toString()}`);
                 return [];
             }
         });
@@ -178,13 +190,14 @@ class DefaultExtension extends MProvider {
         if (videos.length === 0) {
             throw new Error("Failed to extract any videos from the download links.");
         }
+        console.log(`Successfully extracted ${videos.length} total video links.`);
         return videos;
     }
 
     async _extractVideosFromUrl(url, serverName, hosterSelection) {
+        console.log(`Extractor called for URL: ${url} (Server: ${serverName})`);
         const genericVideo = { url: url, quality: this._formatQuality(serverName, url), headers: this._getVideoHeaders(url) };
         let extractedVideos = [];
-
         const streamwish_domains = ["streamwish", "megamax.me", "filelions", "mivalyo", "vidhidepro", "playerwish", "sfastwish", "hglink.to"];
         const dood_domains = ["dood", "ds2play", "dooodster", "d000d", "d-s.io"];
         const vidbom_domains = ["vidbom", "vidbam", "vdbtm", "vidshar"];
@@ -192,18 +205,20 @@ class DefaultExtension extends MProvider {
         const vk_domains = ["vk.com", "vkvideo.ru"];
 
         try {
-            if (dood_domains.some(d => url.includes(d)) && hosterSelection.includes("dood")) extractedVideos.push(genericVideo);
-            else if ((url.includes("ok.ru") || url.includes("odnoklassniki")) && hosterSelection.includes("okru")) extractedVideos = await this._okruExtractor(url, serverName);
-            else if (url.includes("streamtape") && hosterSelection.includes("streamtape")) extractedVideos = await this._streamtapeExtractor(url, serverName);
-            else if (streamwish_domains.some(d => url.includes(d)) && hosterSelection.includes("streamwish")) extractedVideos = await this._streamwishExtractor(url, serverName);
-            else if (vidbom_domains.some(d => url.includes(d)) && hosterSelection.includes("vidbom")) extractedVideos = await this._vidbomExtractor(url);
-            else if (url.includes("filemoon") && hosterSelection.includes("filemoon")) extractedVideos = await this._filemoonExtractor(url, serverName);
-            else if (vk_domains.some(d => url.includes(d)) && hosterSelection.includes("vk")) extractedVideos = await this._vkExtractor(url, serverName);
-            else if (mixdrop_domains.some(d => url.includes(d)) && hosterSelection.includes("mixdrop")) extractedVideos = await this._mixdropExtractor(url, serverName);
-            else if (url.includes("mp4upload.com") && hosterSelection.includes("mp4upload")) extractedVideos = await this._mp4uploadExtractor(url);
+            if (dood_domains.some(d => url.includes(d)) && hosterSelection.includes("dood")) { console.log("Matched extractor: Dood"); extractedVideos.push(genericVideo); }
+            else if ((url.includes("ok.ru") || url.includes("odnoklassniki")) && hosterSelection.includes("okru")) { console.log("Matched extractor: Okru"); extractedVideos = await this._okruExtractor(url, serverName); }
+            else if (url.includes("streamtape") && hosterSelection.includes("streamtape")) { console.log("Matched extractor: Streamtape"); extractedVideos = await this._streamtapeExtractor(url, serverName); }
+            else if (streamwish_domains.some(d => url.includes(d)) && hosterSelection.includes("streamwish")) { console.log("Matched extractor: Streamwish"); extractedVideos = await this._streamwishExtractor(url, serverName); }
+            else if (vidbom_domains.some(d => url.includes(d)) && hosterSelection.includes("vidbom")) { console.log("Matched extractor: Vidbom"); extractedVideos = await this._vidbomExtractor(url); }
+            else if (url.includes("filemoon") && hosterSelection.includes("filemoon")) { console.log("Matched extractor: Filemoon"); extractedVideos = await this._filemoonExtractor(url, serverName); }
+            else if (vk_domains.some(d => url.includes(d)) && hosterSelection.includes("vk")) { console.log("Matched extractor: VK"); extractedVideos = await this._vkExtractor(url, serverName); }
+            else if (mixdrop_domains.some(d => url.includes(d)) && hosterSelection.includes("mixdrop")) { console.log("Matched extractor: Mixdrop"); extractedVideos = await this._mixdropExtractor(url, serverName); }
+            else if (url.includes("mp4upload.com") && hosterSelection.includes("mp4upload")) { console.log("Matched extractor: Mp4upload"); extractedVideos = await this._mp4uploadExtractor(url); }
         } catch (e) { console.error(`Extractor failed for ${url}: ${e}`); }
         
+        console.log(`Extractor produced ${extractedVideos.length} videos.`);
         if (extractedVideos.length === 0) {
+            console.log(`No videos from specific extractor, adding generic fallback link.`);
             extractedVideos.push(genericVideo);
         }
         return extractedVideos;
