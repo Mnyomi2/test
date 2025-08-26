@@ -32,7 +32,6 @@ class DefaultExtension extends MProvider {
     }
     
     _getVideoHeaders(refererUrl) {
-        // Standardized headers to make requests look like they're from a browser.
         return {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/536.36",
             "Referer": refererUrl
@@ -40,14 +39,12 @@ class DefaultExtension extends MProvider {
     }
     
     _formatQuality(baseQuality, url) {
-        // Helper function to conditionally add the URL to the quality string based on user preference.
         const showUrl = this.getPreference("show_video_url_in_quality");
         if (showUrl) {
             return `${baseQuality} - ${url}`;
         }
         return baseQuality;
     }
-
 
     // --- POPULAR ---
 
@@ -90,18 +87,37 @@ class DefaultExtension extends MProvider {
         if (query) {
             url = `${this.source.baseUrl}/page/${page}/?s=${encodeURIComponent(query)}`;
         } else {
-            const typeFilter = filters.find(f => f.name === "نوع الدراما");
-            const statusFilter = filters.find(f => f.name === "حالة الدراما");
-            
-            let filterPath = "";
-            if (typeFilter && typeFilter.state > 0) {
-                filterPath = `/category/asian-drama/${typeFilter.values[typeFilter.state].value}/page/${page}/`;
-            } else if (statusFilter && statusFilter.state > 0) {
-                filterPath = `/${statusFilter.values[statusFilter.state].value}/page/${page}/`;
-            }
+            const sectionFilter = filters.find(f => f.name === "القسم");
+            const countryFilter = filters.find(f => f.name === "الدولة");
+            const genreFilter = filters.find(f => f.name === "النوع");
+            const statusFilter = filters.find(f => f.name === "الحالة");
 
-            if (filterPath) {
-                url = `${this.source.baseUrl}${filterPath}`;
+            const useSection = sectionFilter && sectionFilter.state > 0;
+            const useCountry = countryFilter && countryFilter.state > 0;
+            const useGenre = genreFilter && genreFilter.state > 0;
+            const useStatus = statusFilter && statusFilter.state > 0;
+
+            const activeFilterGroups = [useSection, (useCountry || useGenre), useStatus].filter(Boolean).length;
+            if (activeFilterGroups > 1) {
+                throw new Error("يرجى استخدام مجموعة فلاتر واحدة فقط في كل مرة (إما القسم أو الدولة/النوع أو الحالة)");
+            }
+            
+            if (useSection) {
+                const path = sectionFilter.values[sectionFilter.state].value;
+                url = `${this.source.baseUrl}/${path}/page/${page}/`;
+            } else if (useCountry) {
+                const countrySlug = countryFilter.values[countryFilter.state].value;
+                let path = `/country/${countrySlug}/page/${page}/`;
+                if (useGenre) {
+                    path += `?genre=${encodeURIComponent(genreFilter.values[genreFilter.state].value)}`;
+                }
+                url = `${this.source.baseUrl}${path}`;
+            } else if (useGenre) { // This case handles genre filter alone
+                 const genreSlug = genreFilter.values[genreFilter.state].value;
+                 url = `${this.source.baseUrl}/genre/${encodeURIComponent(genreSlug)}/page/${page}/`;
+            } else if (useStatus) {
+                const path = statusFilter.values[statusFilter.state].value;
+                url = `${this.source.baseUrl}/${path}/page/${page}/`;
             } else {
                 throw new Error("اختر فلترًا عند البحث بدون نص");
             }
@@ -493,12 +509,55 @@ class DefaultExtension extends MProvider {
 
     getFilterList() {
         const f = (name, value) => ({ type_name: "SelectOption", name, value });
-        const types = [f("اختر", ""), f("الدراما الكورية", "korean"), f("الدراما اليابانية", "japanese"), f("الدراما الصينية والتايوانية", "chinese-taiwanese"), f("الدراما التايلاندية", "thai"), f("برامج الترفيه", "kshow")];
-        const statuses = [f("أختر", ""), f("يبث حاليا", "status/ongoing-drama"), f("الدراما المكتملة", "completed-dramas"), f("الدراما القادمة", "status/upcoming-drama")];
+        
+        const sections = [
+            f("اختر قسم", ""),
+            f("الحلقات الجديدة", "category/new-episodes"),
+            f("الدراما الآسيوية (الكل)", "category/asian-drama"),
+            f(" - الدراما الكورية", "category/asian-drama/korean"),
+            f(" - الدراما اليابانية", "category/asian-drama/japanese"),
+            f(" - الصينية والتايوانية", "category/asian-drama/chinese-taiwanese"),
+            f(" - الدراما التايلاندية", "category/asian-drama/thai"),
+            f(" - برامج الترفيه", "category/asian-drama/kshow"),
+            f("الأفلام الآسيوية", "category/asian-movies"),
+        ];
+
+        const countries = [
+            f("الكل", ""), f("كوريا الجنوبية", "korean"), f("الصين", "chinese"), f("اليابان", "japanese"),
+            f("التايلاند", "thai"), f("تايوان", "taiwanese"), f("الفلبين", "philippines"), f("هونغ كونغ", "hong-kong"),
+        ];
+
+        const genres = [
+            f("الكل", ""), f("رومانسي", "رومانسي"), f("كوميدي", "كوميدي"), f("درامي", "درامي"),
+            f("غموض", "غموض"), f("إثارة", "إثارة"), f("خيالي", "خيالي"), f("شبابي", "شبابي"),
+            f("ميلودراما", "ميلودراما"), f("تاريخي", "تاريخي"), f("أكشن", "أكشن"), f("جريمة", "جريمة"),
+            f("مدرسي", "مدرسي"), f("حياة", "حياة"), f("عائلي", "عائلي"), f("تشويق", "تشويق"),
+            f("فانتازيا", "فانتازيا"), f("تحقيق", "تحقيق"), f("صداقة", "صداقة"), f("أعمال", "أعمال"),
+            f("قانوني", "قانوني"), f("طبي", "طبي"), f("موسيقي", "موسيقي"), f("رعب", "رعب"),
+            f("سياسي", "سياسي"), f("نفسي", "نفسي"), f("رياضي", "رياضي"), f("خيال علمي", "خيال علمي"),
+            f("خارق", "خارق"), f("مغامرات", "مغامرات"), f("مانجا", "مانجا"), f("حربي", "حربي"),
+            f("سفر عبر الزمن", "سفر عبر الزمن"), f("انتقام", "انتقام"), f("ويب دراما", "ويب دراما"),
+            f("طعام", "طعام"), f("واقعي", "واقعي"), f("طبخ", "طبخ"),
+        ];
+
+        const statuses = [
+            f("اختر حالة", ""), f("يبث حاليا", "status/ongoing-drama"),
+            f("الدراما المكتملة", "completed-dramas"), f("الدراما القادمة", "status/upcoming-drama")
+        ];
+
         return [
-            { type_name: "HeaderFilter", name: "لا تعمل الفلاتر عند استخدام البحث النصي." },
-            { type_name: "SelectFilter", name: "نوع الدراما", state: 0, values: types },
-            { type_name: "SelectFilter", name: "حالة الدراما", state: 0, values: statuses }
+            { type_name: "HeaderFilter", name: "لا تعمل الفلاتر عند استخدام البحث النصي" },
+            { type_name: "HeaderFilter", name: "هام: اختر فلاتر من مجموعة واحدة فقط في كل مرة" },
+            { type_name: "SeparatorFilter" },
+            { type_name: "HeaderFilter", name: "المجموعة 1: الأقسام الرئيسية" },
+            { type_name: "SelectFilter", name: "القسم", state: 0, values: sections },
+            { type_name: "SeparatorFilter" },
+            { type_name: "HeaderFilter", name: "المجموعة 2: الدولة والنوع" },
+            { type_name: "SelectFilter", name: "الدولة", state: 0, values: countries },
+            { type_name: "SelectFilter", name: "النوع", state: 0, values: genres },
+            { type_name: "SeparatorFilter" },
+            { type_name: "HeaderFilter", name: "المجموعة 3: حالة العرض" },
+            { type_name: "SelectFilter", name: "الحالة", state: 0, values: statuses }
         ];
     }
     
@@ -518,7 +577,7 @@ class DefaultExtension extends MProvider {
                 key: "extract_qualities",
                 switchPreferenceCompat: {
                     title: "استخراج الجودات المتعددة (HLS)",
-                    summary: "عند تفعيله، سيقوم بجلب جميع الجودات المتاحة من السيرفرات الداعمة.",
+                    summary: "عند تفعيله، سيقوم بجلب جميع الجودات المتاحة من السيرفرات الداعمة",
                     value: true, 
                 }
             },
@@ -526,7 +585,7 @@ class DefaultExtension extends MProvider {
                 key: "show_video_url_in_quality",
                 switchPreferenceCompat: {
                     title: "إظهار رابط الفيديو",
-                    summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة.",
+                    summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة",
                     value: false, // Default is off
                 }
             }
