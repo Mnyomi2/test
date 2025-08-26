@@ -12,6 +12,7 @@ const mangayomiSources = [{
 }];
 
 
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -161,17 +162,25 @@ class DefaultExtension extends MProvider {
                 let extractedVideos = [];
                 const genericVideo = { url: embedUrl, quality: serverName, headers: this.getHeaders(embedUrl) };
 
-                if ((embedUrl.includes("dood") || embedUrl.includes("ds2play")) && hosterSelection.includes("dood")) {
+                const streamwish_domains = ["streamwish", "filelions", "iplayerhls", "dhtpre", "mivalyo", "hglink", "haxloppd", "vidhidepro", "vidhideplus", "do7go", "playerwish", "sfastwish"];
+                const dood_domains = ["dood", "ds2play", "dooodster", "d000d", "d-s.io"];
+                const vidbom_domains = ["vidbom", "vidbam", "vdbtm", "1vid1shar"];
+                const mixdrop_domains = ["mixdrop", "mxdrop"];
+                const lulu_domains = ["luluvid", "luluvdoo"];
+                const vk_domains = ["vk.com", "vkvideo.ru"];
+                const ruby_domains = ["streamruby", "rubyvid"];
+
+                if (dood_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("dood")) {
                     extractedVideos.push(genericVideo);
                 } else if ((embedUrl.includes("ok.ru") || embedUrl.includes("odnoklassniki")) && hosterSelection.includes("okru")) {
                     extractedVideos = await this._okruExtractor(embedUrl, `Okru: ${serverName}`);
                 } else if (embedUrl.includes("streamtape") && hosterSelection.includes("streamtape")) {
                     extractedVideos = await this._streamtapeExtractor(embedUrl, `StreamTape: ${serverName}`);
-                } else if ((embedUrl.includes("streamwish") || embedUrl.includes("filelions") || embedUrl.includes("iplayerhls") || embedUrl.includes("dhtpre") || embedUrl.includes("mivalyo") || embedUrl.includes("hglink") || embedUrl.includes("haxloppd")) && hosterSelection.includes("streamwish")) {
+                } else if (streamwish_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("streamwish")) {
                     extractedVideos = await this._streamwishExtractor(embedUrl, `StreamWish: ${serverName}`);
                 } else if (embedUrl.includes("uqload") && hosterSelection.includes("uqload")) {
                     extractedVideos = await this._uqloadExtractor(embedUrl, `Uqload: ${serverName}`);
-                } else if ((embedUrl.includes("vidbom") || embedUrl.includes("vidbam") || embedUrl.includes("vdbtm")) && hosterSelection.includes("vidbom")) {
+                } else if (vidbom_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("vidbom")) {
                     extractedVideos = await this._vidbomExtractor(embedUrl);
                 } else if ((embedUrl.includes("youdbox") || embedUrl.includes("yodbox")) && hosterSelection.includes("yodbox")) {
                     extractedVideos = await this._yodboxExtractor(embedUrl);
@@ -179,10 +188,19 @@ class DefaultExtension extends MProvider {
                     extractedVideos = await this._vidmolyExtractor(embedUrl, `Vidmoly: ${serverName}`);
                 } else if (embedUrl.includes("filemoon") && hosterSelection.includes("filemoon")) {
                     extractedVideos = await this._filemoonExtractor(embedUrl, `Filemoon: ${serverName}`);
-                } else if ((embedUrl.includes("luluvid") || embedUrl.includes("luluvdoo")) && hosterSelection.includes("lulustream")) {
+                } else if (lulu_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("lulustream")) {
                     extractedVideos = await this._lulustreamExtractor(embedUrl, `Lulustream: ${serverName}`);
-                } else if ((embedUrl.includes("vk.com") || embedUrl.includes("vkvideo.ru")) && hosterSelection.includes("vk")) {
+                } else if (vk_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("vk")) {
                     extractedVideos = await this._vkExtractor(embedUrl, `VK: ${serverName}`);
+                } else if (mixdrop_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("mixdrop")) {
+                    extractedVideos = await this._mixdropExtractor(embedUrl, `MixDrop: ${serverName}`);
+                } else if (ruby_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("streamruby")) {
+                    extractedVideos = await this._streamrubyExtractor(embedUrl, `StreamRuby: ${serverName}`);
+                } else if (embedUrl.includes("upstream.to") && hosterSelection.includes("upstream")) {
+                    extractedVideos = await this._upstreamExtractor(embedUrl, `Upstream: ${serverName}`);
+                } else if (hosterSelection.includes("generic")) {
+                    // Fallback for unrecognized servers
+                    extractedVideos.push(genericVideo);
                 }
                 
                 videos.push(...extractedVideos);
@@ -292,7 +310,7 @@ class DefaultExtension extends MProvider {
         
         return sources.map(source => {
             const src = source.substringBefore('"');
-            const quality = "Vidbom: " + source.substringAfter('label:"').substringBefore('"');
+            const quality = "Vidbom/VidShare: " + source.substringAfter('label:"').substringBefore('"');
             return { url: src, quality: quality, originalUrl: src, headers: this.getHeaders(url) };
         });
     }
@@ -370,6 +388,49 @@ class DefaultExtension extends MProvider {
         });
     }
 
+    async _mixdropExtractor(url, prefix = "MixDrop") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        if (!script) return [];
+        script = "eval(function(p,a,c,k,e,d)" + script;
+        const unpacked = unpackJs(script);
+        const videoUrl = "https:" + unpacked.match(/MDCore\.wurl="([^"]+)"/)?.[1];
+        if (!videoUrl) return [];
+        return [{ url: videoUrl, quality: prefix, originalUrl: videoUrl, headers: { "Referer": url } }];
+    }
+
+    async _streamrubyExtractor(url, prefix = "StreamRuby") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        const script = res.body.substringAfter("sources: [").substringBefore("]");
+        if (!script) return [];
+
+        const urls = (script.match(/file:"([^"]+)"/g) || []).map(m => m.replace('file:"', '').replace('"', ''));
+        
+        let allVideos = [];
+        for (const hlsUrl of urls) {
+            if (hlsUrl.includes(".m3u8")) {
+                try {
+                    const hlsContent = (await this.client.get(hlsUrl, this.getHeaders(url))).body;
+                    allVideos.push(...this._parseM3U8(hlsContent, hlsUrl, prefix, this.getHeaders(url)));
+                } catch(e) { /* Ignore */ }
+            }
+        }
+        return allVideos;
+    }
+
+    async _upstreamExtractor(url, prefix = "Upstream") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        if (!script) return [];
+        script = "eval(function(p,a,c,k,e,d)" + script;
+        const unpacked = unpackJs(script);
+        const masterUrl = unpacked.match(/hls:\s*"([^"]+)"/)?.[1];
+        if (!masterUrl) return [];
+
+        const hlsContent = (await this.client.get(masterUrl, this.getHeaders(url))).body;
+        return this._parseM3U8(hlsContent, masterUrl, prefix, this.getHeaders(url));
+    }
+
     // --- FILTERS & PREFERENCES ---
 
     getFilterList() {
@@ -389,9 +450,9 @@ class DefaultExtension extends MProvider {
             multiSelectListPreference: {
                 title: "اختر السيرفرات",
                 summary: "اختر السيرفرات التي تريد ان تظهر",
-                entries: ["DoodStream", "Okru", "StreamTape", "StreamWish/LION", "Uqload", "VidBom", "Vidmoly", "Filemoon", "Lulustream", "VK"],
-                entryValues: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk"],
-                values: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk"],
+                entries: ["DoodStream & Variants", "Okru", "StreamTape", "StreamWish & Variants (Server X, Lion)", "Uqload", "VidBom/VidShare", "Vidmoly", "Filemoon", "Lulustream", "VK", "MixDrop", "StreamRuby", "Upstream", "Generic/WebView"],
+                entryValues: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk", "mixdrop", "streamruby", "upstream", "generic"],
+                values: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk", "mixdrop", "streamruby", "upstream"],
             }
         }];
     }
