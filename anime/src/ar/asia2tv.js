@@ -22,8 +22,9 @@ class DefaultExtension extends MProvider {
 
     // --- PREFERENCES AND HEADERS ---
 
-    getPreference(key) {
-        return new SharedPreferences().get(key);
+    getPreference(key, defaultValue = null) {
+        const value = new SharedPreferences().get(key);
+        return value !== null ? value : defaultValue;
     }
 
     getHeaders(url) {
@@ -152,7 +153,7 @@ class DefaultExtension extends MProvider {
         const doc = new Document(finalRes.body);
         let videos = [];
         
-        const hosterSelection = this.getPreference("hoster_selection") || [];
+        const hosterSelection = this.getPreference("hoster_selection", []);
 
         const serverElements = doc.select("ul.server-list-menu li");
         for (const element of serverElements) {
@@ -207,9 +208,38 @@ class DefaultExtension extends MProvider {
         }
 
         if (videos.length === 0) throw new Error("No videos found from any of your enabled servers.");
-        return videos;
+        return this._processVideoList(videos);
     }
     
+    async _processVideoList(videos) {
+        if (!this.getPreference("asia2tv_extract_qualities", false)) {
+            return videos;
+        }
+
+        const finalVideos = [];
+        for (const video of videos) {
+            const isM3U = video.url && (video.url.toLowerCase().includes('.m3u8') || video.url.toLowerCase().includes('.m3u'));
+            if (isM3U) {
+                try {
+                    const masterPlaylistContent = (await this.client.get(video.url, video.headers)).body;
+                    const parsedQualities = this._parseM3U8(masterPlaylistContent, video.url, video.quality, video.headers);
+
+                    if (parsedQualities.length > 0) {
+                        finalVideos.push({ ...video, quality: `${video.quality} (Auto)` });
+                        finalVideos.push(...parsedQualities);
+                    } else {
+                        finalVideos.push(video);
+                    }
+                } catch (e) {
+                    finalVideos.push(video);
+                }
+            } else {
+                finalVideos.push(video);
+            }
+        }
+        return finalVideos;
+    }
+
     _parseM3U8(playlistContent, playlistUrl, prefix, headers = {}) {
         const videos = [];
         const lines = playlistContent.split('\n');
@@ -219,31 +249,47 @@ class DefaultExtension extends MProvider {
             const line = lines[i];
             if (line.startsWith("#EXT-X-STREAM-INF")) {
                 const resolutionMatch = line.match(/RESOLUTION=(\d+x\d+)/);
-                const quality = resolutionMatch ? resolutionMatch[1].split('x')[1] + "p" : "Default";
+                const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/);
+                let quality = "Default";
+                if (resolutionMatch) {
+                    quality = resolutionMatch[1].split('x')[1] + "p";
+                } else if (bandwidthMatch) {
+                    quality = `${Math.round(parseInt(bandwidthMatch[1]) / 1000)}kbps`;
+                }
+
                 let videoUrl = lines[++i];
                 if (videoUrl && !videoUrl.startsWith('http')) {
                     videoUrl = baseUrl + videoUrl;
                 }
-                if(videoUrl) {
+                if (videoUrl) {
                     videos.push({ url: videoUrl, originalUrl: videoUrl, quality: `${prefix} ${quality}`, headers });
                 }
             }
-        }
-        if (videos.length == 0 && playlistUrl.includes(".m3u8")) {
-             videos.push({ url: playlistUrl, originalUrl: playlistUrl, quality: `${prefix} Default`, headers });
         }
         return videos;
     }
 
     async _okruExtractor(url, prefix = "Okru") {
-        const okruHeaders = { ...this.getHeaders(url), "Referer": url };
-        const res = await this.client.get(url, okruHeaders);
-        const doc = new Document(res.body);
-        const dataOptions = doc.selectFirst("div[data-module='OKVideo'][data-options]")?.attr("data-options");
-        if (!dataOptions) return [];
+        const okruHeaders = { "Referer": url, "User-Agent": this.getHeaders().UserAgent };
+        const res = await this.client.get(url, this.getHeaders(url));
+        
+        // Find the JSON data in the HTML
+        const data = res.body.substringAfter("data-options=\"").substringBefore("\"");
+        if (!data) {
+             const dataFromScript = res.body.substringAfter("OK.VideoPlayer.create(").substringBefore(");");
+             if (dataFromScript) {
+                 const metadata = JSON.parse(JSON.parse(dataFromScript).flashvars.metadata);
+                 if (metadata.hlsManifestUrl) {
+                    const hlsContent = (await this.client.get(metadata.hlsManifestUrl, okruHeaders)).body;
+                    return this._parseM3U8(hlsContent, metadata.hlsManifestUrl, prefix, okruHeaders);
+                 }
+                 return metadata.videos.map(v => ({ url: v.url, quality: `${prefix} ${v.name}`, originalUrl: v.url, headers: okruHeaders })).reverse();
+             }
+             return [];
+        }
 
         try {
-            const json = JSON.parse(dataOptions);
+            const json = JSON.parse(data.replace(/&quot;/g, '"'));
             const metadata = JSON.parse(json.flashvars.metadata);
             
             if (metadata.hlsManifestUrl) {
@@ -281,8 +327,7 @@ class DefaultExtension extends MProvider {
         const masterUrl = unpackJs(script).match(/file:"([^"]+)"/)?.[1];
         if (!masterUrl) return [];
         
-        const hlsContent = (await this.client.get(masterUrl, this.getHeaders(url))).body;
-        return this._parseM3U8(hlsContent, masterUrl, prefix, this.getHeaders(url));
+        return [{ url: masterUrl, quality: prefix, originalUrl: masterUrl, headers: this.getHeaders(url) }];
     }
     
     async _uqloadExtractor(url, prefix = "Uqload") {
@@ -334,17 +379,7 @@ class DefaultExtension extends MProvider {
         if (!script) return [];
 
         const urls = (script.match(/file:"([^"]+)"/g) || []).map(m => m.replace('file:"', '').replace('"', ''));
-        
-        let allVideos = [];
-        for (const hlsUrl of urls) {
-            if (hlsUrl.includes(".m3u8")) {
-                try {
-                    const hlsContent = (await this.client.get(hlsUrl, vidmolyHeaders)).body;
-                    allVideos.push(...this._parseM3U8(hlsContent, hlsUrl, prefix, vidmolyHeaders));
-                } catch(e) { /* Ignore */ }
-            }
-        }
-        return allVideos;
+        return urls.filter(u => u.includes(".m3u8")).map(u => ({ url: u, quality: prefix, originalUrl: u, headers: vidmolyHeaders }));
     }
 
     async _filemoonExtractor(url, prefix = "Filemoon") {
@@ -357,8 +392,7 @@ class DefaultExtension extends MProvider {
         const masterUrl = unpacked.match(/file:"([^"]+)"/)?.[1];
         if (!masterUrl) return [];
 
-        const hlsContent = (await this.client.get(masterUrl, filemoonHeaders)).body;
-        return this._parseM3U8(hlsContent, masterUrl, prefix, filemoonHeaders);
+        return [{ url: masterUrl, quality: prefix, originalUrl: masterUrl, headers: filemoonHeaders }];
     }
     
     async _lulustreamExtractor(url, prefix = "Lulustream") {
@@ -369,8 +403,7 @@ class DefaultExtension extends MProvider {
         const masterUrl = script.match(/file:"([^"]+)"/)?.[1];
         if (!masterUrl) return [];
 
-        const hlsContent = (await this.client.get(masterUrl, this.getHeaders(url))).body;
-        return this._parseM3U8(hlsContent, masterUrl, prefix, this.getHeaders(url));
+        return [{ url: masterUrl, quality: prefix, originalUrl: masterUrl, headers: this.getHeaders(url) }];
     }
 
     async _vkExtractor(url, prefix = "VK") {
@@ -405,17 +438,7 @@ class DefaultExtension extends MProvider {
         if (!script) return [];
 
         const urls = (script.match(/file:"([^"]+)"/g) || []).map(m => m.replace('file:"', '').replace('"', ''));
-        
-        let allVideos = [];
-        for (const hlsUrl of urls) {
-            if (hlsUrl.includes(".m3u8")) {
-                try {
-                    const hlsContent = (await this.client.get(hlsUrl, this.getHeaders(url))).body;
-                    allVideos.push(...this._parseM3U8(hlsContent, hlsUrl, prefix, this.getHeaders(url)));
-                } catch(e) { /* Ignore */ }
-            }
-        }
-        return allVideos;
+        return urls.filter(u => u.includes(".m3u8")).map(u => ({ url: u, quality: prefix, originalUrl: u, headers: this.getHeaders(url) }));
     }
 
     async _upstreamExtractor(url, prefix = "Upstream") {
@@ -427,8 +450,7 @@ class DefaultExtension extends MProvider {
         const masterUrl = unpacked.match(/hls:\s*"([^"]+)"/)?.[1];
         if (!masterUrl) return [];
 
-        const hlsContent = (await this.client.get(masterUrl, this.getHeaders(url))).body;
-        return this._parseM3U8(hlsContent, masterUrl, prefix, this.getHeaders(url));
+        return [{ url: masterUrl, quality: prefix, originalUrl: masterUrl, headers: this.getHeaders(url) }];
     }
 
     // --- FILTERS & PREFERENCES ---
@@ -445,15 +467,25 @@ class DefaultExtension extends MProvider {
     }
     
     getSourcePreferences() {
-        return [{
-            key: "hoster_selection",
-            multiSelectListPreference: {
-                title: "اختر السيرفرات",
-                summary: "اختر السيرفرات التي تريد ان تظهر",
-                entries: ["DoodStream & Variants", "Okru", "StreamTape", "StreamWish & Variants (Server X, Lion)", "Uqload", "VidBom/VidShare", "Vidmoly", "Filemoon", "Lulustream", "VK", "MixDrop", "StreamRuby", "Upstream", "Generic/WebView"],
-                entryValues: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk", "mixdrop", "streamruby", "upstream", "generic"],
-                values: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk", "mixdrop", "streamruby", "upstream"],
+        return [
+            {
+                key: "hoster_selection",
+                multiSelectListPreference: {
+                    title: "اختر السيرفرات",
+                    summary: "اختر السيرفرات التي تريد ان تظهر",
+                    entries: ["DoodStream & Variants", "Okru", "StreamTape", "StreamWish & Variants (Server X, Lion)", "Uqload", "VidBom/VidShare", "Vidmoly", "Filemoon", "Lulustream", "VK", "MixDrop", "StreamRuby", "Upstream", "Generic/WebView"],
+                    entryValues: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk", "mixdrop", "streamruby", "upstream", "generic"],
+                    values: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk", "mixdrop", "streamruby", "upstream"],
+                }
+            },
+            {
+                key: "asia2tv_extract_qualities",
+                switchPreferenceCompat: {
+                    title: "Enable Stream Quality Extraction",
+                    summary: "If a stream provides multiple qualities, this will list them. Slower but more options.",
+                    value: false,
+                }
             }
-        }];
+        ];
     }
 }
