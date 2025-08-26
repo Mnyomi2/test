@@ -519,7 +519,6 @@ class DefaultExtension extends MProvider {
             f(" - الصينية والتايوانية", "category/asian-drama/chinese-taiwanese"),
             f(" - الدراما التايلاندية", "category/asian-drama/thai"),
             f(" - برامج الترفيه", "category/asian-drama/kshow"),
-            f("الأفلام الآسيوية", "category/asian-movies"),
         ];
 
         const countries = [
