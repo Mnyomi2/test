@@ -11,6 +11,8 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/animerco.js"
 }];
 
+
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -246,9 +248,9 @@ class DefaultExtension extends MProvider {
             editTextPreference: {
                 title: "Override Base URL",
                 summary: "For temporary uses. Update the extension for permanent changes.",
-                value: "https://vip.animerco.org",
+                value: "https://tv.animerco.org",
                 dialogTitle: "Override Base URL",
-                dialogMessage: "Default: " + "https://vip.animerco.org",
+                dialogMessage: "Default: " + "https://tv.animerco.org",
             }
         }, {
             key: "preferred_quality",
@@ -262,5 +264,4 @@ class DefaultExtension extends MProvider {
         }];
     }
 }
-
 
