@@ -33,7 +33,15 @@ class DefaultExtension extends MProvider {
         return {
             "Referer": this.getBaseUrl() + "/",
             "Origin": this.getBaseUrl(),
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "X-Requested-With": "XMLHttpRequest"
+        };
+    }
+
+    _getVideoHeaders(refererUrl) {
+        return {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/536.36",
+            "Referer": refererUrl
         };
     }
 
@@ -77,25 +85,14 @@ class DefaultExtension extends MProvider {
             const episodeUrl = item.selectFirst("div.info a")?.attr("href");
 
             if (name && imageUrl && seasonText && episodeUrl) {
-                // Step 1: Extract the full slug from the episode URL. This is more reliable than
-                // generating one from the short title. The regex captures the content between
-                // "/episodes/" and the URL-encoded Arabic word for "episode".
                 const slugMatch = episodeUrl.match(/\/episodes\/(.+?)-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-\d+/);
-
                 if (!slugMatch) continue;
                 let fullSlug = slugMatch[1];
-
-                // Step 2: Clean the extracted slug by removing any pre-existing "-season-X" suffix.
-                // This handles site inconsistencies where the season is sometimes included in the episode URL.
                 const baseSlug = fullSlug.replace(/-season-\d+$/, '');
-
                 const seasonMatch = seasonText.match(/(\d+)/);
                 if (!seasonMatch) continue;
                 const seasonNumber = seasonMatch[1];
-                
-                // Step 3: Construct the final, correct series link using the cleaned base slug.
                 const link = `/seasons/${baseSlug}-season-${seasonNumber}/`;
-
                 list.push({ name, imageUrl, link });
             }
         }
@@ -133,7 +130,6 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body, res.url);
 
         let name = doc.selectFirst("div.media-title > h1")?.text;
-        
         if (name) {
             name = name.replace(/\s+(season|الموسم)\s+\d+\s*$/i, '').trim();
         }
@@ -148,22 +144,15 @@ class DefaultExtension extends MProvider {
         const statusText = doc.selectFirst("div.status > a")?.text;
         let status = 5;
         if (statusText) {
-            if (statusText.includes("يعرض الأن")) {
-                status = 0;
-            } else if (statusText.includes("مكتمل")) {
-                status = 1;
-            }
+            if (statusText.includes("يعرض الأن")) status = 0;
+            else if (statusText.includes("مكتمل")) status = 1;
         }
 
         const genre = doc.select("div.genres a").map(e => e.text);
         const chapters = [];
         
         if (doc.location && doc.location.includes("/movies/")) {
-            chapters.push({
-                name: "Movie",
-                url: url,
-                scanlator: "1" // Movie "chapter" number
-            });
+            chapters.push({ name: "Movie", url: url, scanlator: "1" });
         } else {
             const seasonNameFromTitle = doc.selectFirst("div.media-title h1")?.text;
             const seasonNumMatch = seasonNameFromTitle?.match(/(\d+)/);
@@ -171,26 +160,25 @@ class DefaultExtension extends MProvider {
             
             const episodeElements = doc.select("ul.episodes-lists li");
             for (const ep of episodeElements) {
-                const epLink = ep.selectFirst("a.title");
-                if (!epLink) continue;
+                const epLinkElement = ep.selectFirst("a.title");
+                if (!epLinkElement) continue;
 
-                const epText = epLink.selectFirst("h3")?.text;
+                const epName = ep.selectFirst("a.image")?.attr("title")?.trim();
                 const epNum = parseInt(ep.attr("data-number"));
-                const epUrl = epLink.attr("href");
+                const epUrl = epLinkElement.attr("href");
 
-                if (epText && !isNaN(epNum) && epUrl) {
+                if (epName && !isNaN(epNum) && epUrl) {
                     const scanlator = parseFloat(`${seasonNum}.${String(epNum).padStart(3, '0')}`);
                     chapters.push({
-                        name: epText,
+                        name: epName,
                         url: epUrl.replace(this.getBaseUrl(), ""),
-                        scanlator: String(scanlator) // Ensure this is a string to avoid DB issues
+                        scanlator: String(scanlator)
                     });
                 }
             }
         }
         
         chapters.sort((a, b) => parseFloat(b.scanlator) - parseFloat(a.scanlator));
-
         return { name, imageUrl, description, link: url, status, genre, chapters };
     }
 
@@ -198,43 +186,85 @@ class DefaultExtension extends MProvider {
         const fullUrl = this.getBaseUrl() + url;
         const res = await this.client.get(fullUrl, this.getHeaders(fullUrl));
         const doc = new Document(res.body, res.url);
-        const players = doc.select("li.dooplay_player_option");
-        const videos = [];
 
-        const promises = players.map(player => {
-            const postData = {
-                "action": "doo_player_ajax",
-                "post": player.attr("data-post"),
-                "nume": player.attr("data-nume"),
-                "type": player.attr("data-type")
-            };
-            const serverName = player.selectFirst("span.title")?.text ?? "Unknown Server";
-            return this.client.post(`${this.getBaseUrl()}/wp-admin/admin-ajax.php`, postData, this.getHeaders(fullUrl))
-                .then(playerRes => ({ playerRes, serverName }));
+        const hosterSelection = this.getPreference("hoster_selection") || [];
+        const players = doc.select("ul.server-list li a.option");
+        
+        const promises = players.map(async (player) => {
+            try {
+                const postData = {
+                    "action": "player_ajax",
+                    "post": player.attr("data-post"),
+                    "nume": player.attr("data-nume"),
+                    "type": player.attr("data-type")
+                };
+                const serverName = player.selectFirst("span.server")?.text.trim() || "Unknown";
+
+                const playerRes = await this.client.post(
+                    `${this.getBaseUrl()}/wp-admin/admin-ajax.php`,
+                    postData,
+                    this.getHeaders(fullUrl)
+                );
+                
+                const embedUrl = JSON.parse(playerRes.body).embed_url.replace(/\\/g, "");
+                if (!embedUrl) return [];
+
+                let extractedVideos = [];
+                const genericVideo = { url: embedUrl, quality: this._formatQuality(serverName, embedUrl), headers: this._getVideoHeaders(embedUrl) };
+                
+                const streamwish_domains = ["streamwish", "megamax.me", "filelions", "iplayerhls", "mivalyo", "vidhidepro", "playerwish", "sfastwish"];
+                const dood_domains = ["dood", "ds2play", "dooodster", "d000d", "d-s.io"];
+                const vidbom_domains = ["vidbom", "vidbam", "vdbtm", "vidshar"];
+                const mixdrop_domains = ["mixdrop", "mxdrop"];
+                const lulu_domains = ["luluvid", "luluvdoo"];
+                const vk_domains = ["vk.com", "vkvideo.ru"];
+                const ruby_domains = ["streamruby", "rubyvid"];
+
+                if (dood_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("dood")) {
+                    extractedVideos.push(genericVideo);
+                } else if ((embedUrl.includes("ok.ru") || embedUrl.includes("odnoklassniki")) && hosterSelection.includes("okru")) {
+                    extractedVideos = await this._okruExtractor(embedUrl, serverName);
+                } else if (embedUrl.includes("streamtape") && hosterSelection.includes("streamtape")) {
+                    extractedVideos = await this._streamtapeExtractor(embedUrl, serverName);
+                } else if (streamwish_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("streamwish")) {
+                    extractedVideos = await this._streamwishExtractor(embedUrl, serverName);
+                } else if (embedUrl.includes("uqload") && hosterSelection.includes("uqload")) {
+                    extractedVideos = await this._uqloadExtractor(embedUrl, serverName);
+                } else if (vidbom_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("vidbom")) {
+                    extractedVideos = await this._vidbomExtractor(embedUrl);
+                } else if ((embedUrl.includes("youdbox") || embedUrl.includes("yodbox")) && hosterSelection.includes("yodbox")) {
+                    extractedVideos = await this._yodboxExtractor(embedUrl);
+                } else if (embedUrl.includes("vidmoly") && hosterSelection.includes("vidmoly")) {
+                    extractedVideos = await this._vidmolyExtractor(embedUrl, serverName);
+                } else if (embedUrl.includes("filemoon") && hosterSelection.includes("filemoon")) {
+                    extractedVideos = await this._filemoonExtractor(embedUrl, serverName);
+                } else if (lulu_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("lulustream")) {
+                    extractedVideos = await this._lulustreamExtractor(embedUrl, serverName);
+                } else if (vk_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("vk")) {
+                    extractedVideos = await this._vkExtractor(embedUrl, serverName);
+                } else if (mixdrop_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("mixdrop")) {
+                    extractedVideos = await this._mixdropExtractor(embedUrl, serverName);
+                } else if (ruby_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("streamruby")) {
+                    extractedVideos = await this._streamrubyExtractor(embedUrl, serverName);
+                } else if (embedUrl.includes("upstream.to") && hosterSelection.includes("upstream")) {
+                    extractedVideos = await this._upstreamExtractor(embedUrl, serverName);
+                } else if (embedUrl.includes("mp4upload") && hosterSelection.includes("mp4upload")) {
+                    extractedVideos.push(genericVideo);
+                } else if (hosterSelection.includes("generic")) {
+                    extractedVideos.push(genericVideo);
+                }
+                return extractedVideos;
+            } catch (e) {
+                return [];
+            }
         });
 
         const results = await Promise.all(promises);
+        const videos = results.flat();
 
-        for (const { playerRes, serverName } of results) {
-            try {
-                const embedUrl = JSON.parse(playerRes.body).embed_url.replace(/\\/g, "");
-                if (embedUrl) {
-                    videos.push({ url: embedUrl, quality: serverName, headers: this.getHeaders(embedUrl) });
-                }
-            } catch (e) {
-                console.error(`Failed to parse player response for ${serverName}: ${e}`);
-            }
+        if (videos.length === 0) {
+            throw new Error("No videos found. Check your selected servers in settings.");
         }
-        
-        const quality = this.getPreference("preferred_quality") || "1080";
-        videos.sort((a, b) => {
-            const aQuality = a.quality.toLowerCase();
-            const bQuality = b.quality.toLowerCase();
-            if (aQuality.includes(quality.toLowerCase())) return -1;
-            if (bQuality.includes(quality.toLowerCase())) return 1;
-            return 0;
-        });
-
         return videos;
     }
 
@@ -242,6 +272,240 @@ class DefaultExtension extends MProvider {
         return [];
     }
 
+    // --- HELPERS ---
+    _formatQuality(baseQuality, url) {
+        const showUrl = this.getPreference("show_video_url_in_quality");
+        return showUrl ? `${baseQuality} - ${url}` : baseQuality;
+    }
+
+    async _parseM3U8(playlistUrl, prefix, headers = {}) {
+        const videos = [];
+        videos.push({ url: playlistUrl, originalUrl: playlistUrl, quality: this._formatQuality(`${prefix} Auto (HLS)`, playlistUrl), headers });
+
+        if (!this.getPreference("extract_qualities")) {
+            return videos;
+        }
+
+        try {
+            const playlistContent = (await this.client.get(playlistUrl, headers)).body;
+            const lines = playlistContent.split('\n');
+            const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (line.startsWith("#EXT-X-STREAM-INF")) {
+                    const resolutionMatch = line.match(/RESOLUTION=(\d+x\d+)/);
+                    let quality = "Unknown";
+                    if (resolutionMatch) {
+                        quality = resolutionMatch[1].split('x')[1] + "p";
+                    }
+                    let videoUrl = lines[++i];
+                    if (videoUrl && !videoUrl.startsWith('http')) {
+                        videoUrl = baseUrl + videoUrl;
+                    }
+                    if(videoUrl) {
+                        videos.push({ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(`${prefix} ${quality}`, videoUrl), headers });
+                    }
+                }
+            }
+            return videos;
+        } catch(e) {
+            return videos;
+        }
+    }
+
+    // --- EXTRACTORS ---
+    async _okruExtractor(url, prefix = "Okru") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        const dataOptions = res.body.substringAfter("data-options=\"").substringBefore("\"");
+        if (!dataOptions) return [];
+        
+        try {
+            const json = JSON.parse(dataOptions.replace(/&quot;/g, '"'));
+            const metadata = JSON.parse(json.flashvars.metadata);
+            
+            return metadata.videos.map(video => {
+                const quality = video.name === "full" ? "1080p" : video.name === "hd" ? "720p" : video.name === "sd" ? "480p" : video.name;
+                return {
+                    url: video.url,
+                    originalUrl: video.url,
+                    quality: this._formatQuality(`${prefix} ${quality}`, video.url),
+                    headers: this._getVideoHeaders("https://ok.ru/")
+                };
+            }).reverse();
+        } catch (e) { return []; }
+    }
+
+    async _streamtapeExtractor(url, quality = "Streamtape") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        const script = res.body.substringAfter("document.getElementById('robotlink')").substringBefore("</script>");
+        if (!script) return [];
+
+        const videoUrlPart1 = script.substringAfter("innerHTML = '").substringBefore("'");
+        const videoUrlPart2 = script.substringAfter("+ ('xcd").substringBefore("'");
+        const finalUrl = "https:" + videoUrlPart1 + videoUrlPart2;
+        
+        return [{ url: finalUrl, quality: this._formatQuality(quality, finalUrl), originalUrl: finalUrl, headers: this._getVideoHeaders(url) }];
+    }
+    
+    async _streamwishExtractor(url, prefix = "StreamWish") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        if (!script) return [];
+
+        script = "eval(function(p,a,c,k,e,d)" + script;
+        const unpacked = unpackJs(script);
+        
+        const masterUrl = unpacked.match(/(https?:\/\/[^"]+\.m3u8[^"]*)/)?.[1];
+        if (!masterUrl) return [];
+        
+        return this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url));
+    }
+    
+    async _uqloadExtractor(url, prefix = "Uqload") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        const script = res.body.substringAfter("sources: [").substringBefore("]");
+        if (!script) return [];
+
+        const videoUrl = script.replace(/"/g, '');
+        if (!videoUrl.startsWith("http")) return [];
+        
+        return [{ url: videoUrl, quality: this._formatQuality(prefix, videoUrl), originalUrl: videoUrl, headers: this._getVideoHeaders("https://uqload.to/") }];
+    }
+
+    async _vidbomExtractor(url) {
+        const res = await this.client.get(url, this.getHeaders(url));
+        const script = res.body.substringAfter("sources: [").substringBefore("]");
+        if (!script) return [];
+
+        const videoHeaders = this._getVideoHeaders(url);
+        const sources = script.split('{file:"').slice(1);
+        
+        let allVideos = [];
+        for (const source of sources) {
+            const src = source.substringBefore('"');
+            if (src.includes(".m3u8")) {
+                const hlsVideos = await this._parseM3U8(src, "VidShare", videoHeaders);
+                allVideos.push(...hlsVideos);
+            } else {
+                const qualityLabel = "VidShare: " + source.substringAfter('label:"').substringBefore('"');
+                allVideos.push({
+                    url: src,
+                    originalUrl: src,
+                    quality: this._formatQuality(qualityLabel, src),
+                    headers: videoHeaders
+                });
+            }
+        }
+        return allVideos;
+    }
+
+    async _yodboxExtractor(url) {
+        try {
+            const res = await this.client.get(url, this.getHeaders(url));
+            const videoUrl = new Document(res.body).selectFirst("source")?.getSrc;
+            if (videoUrl) {
+                return [{ url: videoUrl, quality: this._formatQuality("Yodbox", videoUrl), originalUrl: videoUrl, headers: this._getVideoHeaders(url) }];
+            }
+        } catch (e) {}
+        return [];
+    }
+
+    async _vidmolyExtractor(url, prefix = "Vidmoly") {
+        const videoHeaders = this._getVideoHeaders("https://vidmoly.to/");
+        const res = await this.client.get(url, videoHeaders);
+        const script = res.body.substringAfter("sources: [").substringBefore("]");
+        if (!script) return [];
+
+        const urls = (script.match(/file:"([^"]+)"/g) || []).map(m => m.replace('file:"', '').replace('"', ''));
+        
+        let allVideos = [];
+        for (const hlsUrl of urls) {
+            if (hlsUrl.includes(".m3u8")) {
+                allVideos.push(...await this._parseM3U8(hlsUrl, prefix, videoHeaders));
+            }
+        }
+        return allVideos;
+    }
+
+    async _filemoonExtractor(url, prefix = "Filemoon") {
+        const videoHeaders = { ...this._getVideoHeaders(url), "Origin": `https://${new URL(url).hostname}` };
+        const res = await this.client.get(url, videoHeaders);
+        
+        const jsEval = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        if (!jsEval) return [];
+
+        const unpacked = unpackJs("eval(function(p,a,c,k,e,d)" + jsEval);
+        const masterUrl = unpacked.match(/file:"([^"]+)"/)?.[1];
+        if (!masterUrl) return [];
+
+        return this._parseM3U8(masterUrl, prefix, videoHeaders);
+    }
+    
+    async _lulustreamExtractor(url, prefix = "Lulustream") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        const script = res.body.substringAfter('jwplayer("vplayer").setup({').substringBefore('});');
+        if (!script) return [];
+
+        const masterUrl = script.match(/file:"([^"]+)"/)?.[1];
+        if (!masterUrl) return [];
+
+        return this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url));
+    }
+
+    async _vkExtractor(url, prefix = "VK") {
+        const videoHeaders = { ...this._getVideoHeaders("https://vk.com/"), "Origin": "https://vk.com" };
+        const res = await this.client.get(url, videoHeaders);
+        const matches = [...res.body.matchAll(/"url(\d+)":"(.*?)"/g)];
+        
+        return matches.map(match => {
+            const qualityLabel = `${prefix} ${match[1]}p`;
+            const videoUrl = match[2].replace(/\\/g, '');
+            return { url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(qualityLabel, videoUrl), headers: videoHeaders };
+        });
+    }
+
+    async _mixdropExtractor(url, prefix = "MixDrop") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        if (!script) return [];
+        script = "eval(function(p,a,c,k,e,d)" + script;
+        const unpacked = unpackJs(script);
+        const videoUrl = "https:" + unpacked.match(/MDCore\.wurl="([^"]+)"/)?.[1];
+        if (!videoUrl) return [];
+        return [{ url: videoUrl, quality: this._formatQuality(prefix, videoUrl), originalUrl: videoUrl, headers: this._getVideoHeaders(url) }];
+    }
+
+    async _streamrubyExtractor(url, prefix = "StreamRuby") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        const script = res.body.substringAfter("sources: [").substringBefore("]");
+        if (!script) return [];
+
+        const urls = (script.match(/file:"([^"]+)"/g) || []).map(m => m.replace('file:"', '').replace('"', ''));
+        const videoHeaders = this._getVideoHeaders(url);
+        
+        let allVideos = [];
+        for (const hlsUrl of urls) {
+            if (hlsUrl.includes(".m3u8")) {
+                allVideos.push(...await this._parseM3U8(hlsUrl, prefix, videoHeaders));
+            }
+        }
+        return allVideos;
+    }
+
+    async _upstreamExtractor(url, prefix = "Upstream") {
+        const res = await this.client.get(url, this.getHeaders(url));
+        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        if (!script) return [];
+        script = "eval(function(p,a,c,k,e,d)" + script;
+        const unpacked = unpackJs(script);
+        const masterUrl = unpacked.match(/hls:\s*"([^"]+)"/)?.[1];
+        if (!masterUrl) return [];
+
+        return this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url));
+    }
+
+    // --- PREFERENCES ---
     getSourcePreferences() {
         return [{
             key: "override_base_url",
@@ -250,18 +514,31 @@ class DefaultExtension extends MProvider {
                 summary: "For temporary uses. Update the extension for permanent changes.",
                 value: "https://tv.animerco.org",
                 dialogTitle: "Override Base URL",
-                dialogMessage: "Default: " + "https://tv.animerco.org",
+                dialogMessage: "Default: https://tv.animerco.org",
             }
         }, {
-            key: "preferred_quality",
-            listPreference: {
-                title: "Preferred quality",
-                summary: "Preferred quality for video streaming",
-                valueIndex: 0,
-                entries: ["1080p", "720p", "480p", "360p", "Doodstream", "StreamTape", "Mp4upload", "Okru"],
-                entryValues: ["1080", "720", "480", "360", "Doodstream", "StreamTape", "Mp4upload", "Okru"],
+            key: "hoster_selection",
+            multiSelectListPreference: {
+                title: "Select Servers",
+                summary: "Select which servers to attempt to extract from",
+                entries: ["DoodStream", "Okru", "StreamTape", "StreamWish/MegaMax", "Uqload", "VidBom/VidShare", "Vidmoly", "Filemoon", "Lulustream", "VK", "MixDrop", "StreamRuby", "Upstream", "Mp4upload", "Generic/WebView (Fallback)"],
+                entryValues: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk", "mixdrop", "streamruby", "upstream", "mp4upload", "generic"],
+                values: ["okru", "streamwish", "vidbom", "filemoon", "vk", "mp4upload", "generic"],
+            }
+        }, {
+            key: "extract_qualities",
+            switchPreferenceCompat: {
+                title: "Extract multiple qualities (HLS)",
+                summary: "When enabled, will attempt to extract all available qualities from supported servers",
+                value: true, 
+            }
+        }, {
+            key: "show_video_url_in_quality",
+            switchPreferenceCompat: {
+                title: "Show video URL",
+                summary: "Show the final video URL next to the quality name",
+                value: false,
             }
         }];
     }
 }
-
