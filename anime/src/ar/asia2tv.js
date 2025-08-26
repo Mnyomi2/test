@@ -585,7 +585,7 @@ class DefaultExtension extends MProvider {
                 switchPreferenceCompat: {
                     title: "إظهار رابط الفيديو",
                     summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة",
-                    value: false, // Default is off
+                    value: false,
                 }
             }
         ];
