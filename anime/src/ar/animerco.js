@@ -11,7 +11,6 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/animerco.js"
 }];
 
-;
 
 class DefaultExtension extends MProvider {
     constructor() {
@@ -30,11 +29,10 @@ class DefaultExtension extends MProvider {
     }
 
     getHeaders(url) {
+        // Standard headers for fetching HTML pages
         return {
-            "Referer": url,
-            "Origin": this.getBaseUrl(),
+            "Referer": this.getBaseUrl() + "/",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            "X-Requested-With": "XMLHttpRequest"
         };
     }
 
@@ -149,46 +147,37 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body, res.url);
         
         const hosterSelection = this.getPreference("hoster_selection") || [];
-        const sourceTypeSelection = this.getPreference("source_type_selection") || ["streaming", "download"];
-        let allPromises = [];
-
-        if (sourceTypeSelection.includes("streaming")) {
-            const streamingPlayers = doc.select("ul.server-list li a.option");
-            const streamingPromises = streamingPlayers.map(async (player) => {
-                try {
-                    const postData = {"action": "player_ajax", "post": player.attr("data-post"), "nume": player.attr("data-nume"), "type": player.attr("data-type")};
-                    const playerRes = await this.client.post(`${this.getBaseUrl()}/wp-admin/admin-ajax.php`, postData, this.getHeaders(fullUrl));
-                    const embedUrl = JSON.parse(playerRes.body).embed_url.replace(/\\/g, "");
-                    const serverName = player.selectFirst("span.server")?.text.trim() || "Unknown";
-                    if (!embedUrl) return [];
-                    return this._extractVideosFromUrl(embedUrl, serverName, hosterSelection);
-                } catch (e) { return []; }
-            });
-            allPromises.push(...streamingPromises);
-        }
-
-        if (sourceTypeSelection.includes("download")) {
-            const downloadLinks = doc.select("div#download tbody tr");
-            const downloadPromises = downloadLinks.map(async (row) => {
-                try {
-                    const linkUrl = row.selectFirst("a")?.attr("href");
-                    if (!linkUrl) return [];
-                    const linkPageRes = await this.client.get(linkUrl, this.getHeaders(linkUrl));
-                    const encodedUrl = new Document(linkPageRes.body).selectFirst("a#link[data-url]")?.attr("data-url");
-                    if (!encodedUrl) return [];
-                    const decodedUrl = new MBuffer(encodedUrl, "base64").toString();
-                    const serverDomain = row.selectFirst("div.favicon")?.attr("data-src")?.match(/domain=([^&]+)/)?.[1] || "Download";
-                    const quality = row.selectFirst("strong.badge")?.text?.trim() || serverDomain;
-                    return this._extractVideosFromUrl(decodedUrl, quality, hosterSelection);
-                } catch (e) { return []; }
-            });
-            allPromises.push(...downloadPromises);
-        }
+        const downloadLinks = doc.select("div#download tbody tr");
         
-        const results = await Promise.all(allPromises);
+        if (downloadLinks.length === 0) {
+            throw new Error("No download links section found on the page.");
+        }
+
+        const promises = downloadLinks.map(async (row) => {
+            try {
+                const linkUrl = row.selectFirst("a")?.attr("href");
+                if (!linkUrl) return [];
+
+                const linkPageRes = await this.client.get(linkUrl, this.getHeaders(linkUrl));
+                const encodedUrl = new Document(linkPageRes.body).selectFirst("a#link[data-url]")?.attr("data-url");
+                if (!encodedUrl) return [];
+
+                const decodedUrl = new MBuffer(encodedUrl, "base64").toString();
+                const serverDomain = row.selectFirst("div.favicon")?.attr("data-src")?.match(/domain=([^&]+)/)?.[1] || "Download";
+                const quality = row.selectFirst("strong.badge")?.text?.trim() || serverDomain;
+                
+                return this._extractVideosFromUrl(decodedUrl, quality, hosterSelection);
+            } catch (e) {
+                return [];
+            }
+        });
+
+        const results = await Promise.all(promises);
         const videos = results.flat();
 
-        if (videos.length === 0) throw new Error("No video links found on the page.");
+        if (videos.length === 0) {
+            throw new Error("Failed to extract any videos from the download links.");
+        }
         return videos;
     }
 
@@ -229,10 +218,11 @@ class DefaultExtension extends MProvider {
         try {
             const playlistContent = (await this.client.get(playlistUrl, headers)).body;
             const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
-            for (const line of playlistContent.split('\n')) {
-                if (line.startsWith("#EXT-X-STREAM-INF")) {
-                    const resolution = line.match(/RESOLUTION=(\d+x\d+)/)?.[1].split('x')[1] + "p" || "Unknown";
-                    let videoUrl = playlistContent.split('\n')[playlistContent.split('\n').indexOf(line) + 1];
+            const lines = playlistContent.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith("#EXT-X-STREAM-INF")) {
+                    const resolution = lines[i].match(/RESOLUTION=(\d+x\d+)/)?.[1].split('x')[1] + "p" || "Unknown";
+                    let videoUrl = lines[i + 1];
                     if (videoUrl && !videoUrl.startsWith('http')) videoUrl = baseUrl + videoUrl;
                     if (videoUrl) videos.push({ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(`${prefix} ${resolution}`, videoUrl), headers });
                 }
@@ -314,15 +304,6 @@ class DefaultExtension extends MProvider {
         return [{
             key: "override_base_url",
             editTextPreference: { title: "Override Base URL", summary: "For temporary uses. Update the extension for permanent changes.", value: "https://tv.animerco.org", dialogTitle: "Override Base URL", dialogMessage: "Default: https://tv.animerco.org" }
-        }, {
-            key: "source_type_selection",
-            multiSelectListPreference: {
-                title: "Link Types to Fetch",
-                summary: "Choose whether to fetch streaming servers, download links, or both",
-                entries: ["Streaming Servers", "Download Links"],
-                entryValues: ["streaming", "download"],
-                values: ["streaming", "download"],
-            }
         }, {
             key: "hoster_selection",
             multiSelectListPreference: {
