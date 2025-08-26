@@ -11,6 +11,7 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/asia2tv.js"
 }];
 
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -166,7 +167,7 @@ class DefaultExtension extends MProvider {
                     extractedVideos = await this._okruExtractor(embedUrl, `Okru: ${serverName}`);
                 } else if (embedUrl.includes("streamtape") && hosterSelection.includes("streamtape")) {
                     extractedVideos = await this._streamtapeExtractor(embedUrl, `StreamTape: ${serverName}`);
-                } else if ((embedUrl.includes("streamwish") || embedUrl.includes("filelions") || embedUrl.includes("iplayerhls") || embedUrl.includes("dhtpre")) && hosterSelection.includes("streamwish")) {
+                } else if ((embedUrl.includes("streamwish") || embedUrl.includes("filelions") || embedUrl.includes("iplayerhls") || embedUrl.includes("dhtpre") || embedUrl.includes("mivalyo") || embedUrl.includes("hglink") || embedUrl.includes("haxloppd")) && hosterSelection.includes("streamwish")) {
                     extractedVideos = await this._streamwishExtractor(embedUrl, `StreamWish: ${serverName}`);
                 } else if (embedUrl.includes("uqload") && hosterSelection.includes("uqload")) {
                     extractedVideos = await this._uqloadExtractor(embedUrl, `Uqload: ${serverName}`);
@@ -180,6 +181,8 @@ class DefaultExtension extends MProvider {
                     extractedVideos = await this._filemoonExtractor(embedUrl, `Filemoon: ${serverName}`);
                 } else if ((embedUrl.includes("luluvid") || embedUrl.includes("luluvdoo")) && hosterSelection.includes("lulustream")) {
                     extractedVideos = await this._lulustreamExtractor(embedUrl, `Lulustream: ${serverName}`);
+                } else if ((embedUrl.includes("vk.com") || embedUrl.includes("vkvideo.ru")) && hosterSelection.includes("vk")) {
+                    extractedVideos = await this._vkExtractor(embedUrl, `VK: ${serverName}`);
                 }
                 
                 videos.push(...extractedVideos);
@@ -352,27 +355,27 @@ class DefaultExtension extends MProvider {
         return this._parseM3U8(hlsContent, masterUrl, prefix, this.getHeaders(url));
     }
 
+    async _vkExtractor(url, prefix = "VK") {
+        const vkHeaders = { "Origin": "https://vk.com", "Referer": "https://vk.com/", ...this.getHeaders(url) };
+        const res = await this.client.get(url, vkHeaders);
+        const body = res.body;
+
+        const regex = /"url(\d+)":"(.*?)"/g;
+        const matches = [...body.matchAll(regex)];
+        
+        return matches.map(match => {
+            const quality = match[1] + "p";
+            const videoUrl = match[2].replace(/\\/g, '');
+            return { url: videoUrl, originalUrl: videoUrl, quality: `${prefix} ${quality}`, headers: vkHeaders };
+        });
+    }
+
     // --- FILTERS & PREFERENCES ---
 
     getFilterList() {
         const f = (name, value) => ({ type_name: "SelectOption", name, value });
-
-        const types = [
-            f("اختر", ""),
-            f("الدراما الكورية", "korean"),
-            f("الدراما اليابانية", "japanese"),
-            f("الدراما الصينية والتايوانية", "chinese-taiwanese"),
-            f("الدراما التايلاندية", "thai"),
-            f("برامج الترفيه", "kshow")
-        ];
-
-        const statuses = [
-            f("أختر", ""),
-            f("يبث حاليا", "status/ongoing-drama"),
-            f("الدراما المكتملة", "completed-dramas"),
-            f("الدراما القادمة", "status/upcoming-drama")
-        ];
-
+        const types = [f("اختر", ""), f("الدراما الكورية", "korean"), f("الدراما اليابانية", "japanese"), f("الدراما الصينية والتايوانية", "chinese-taiwanese"), f("الدراما التايلاندية", "thai"), f("برامج الترفيه", "kshow")];
+        const statuses = [f("أختر", ""), f("يبث حاليا", "status/ongoing-drama"), f("الدراما المكتملة", "completed-dramas"), f("الدراما القادمة", "status/upcoming-drama")];
         return [
             { type_name: "HeaderFilter", name: "لا تعمل الفلاتر عند استخدام البحث النصي." },
             { type_name: "SelectFilter", name: "نوع الدراما", state: 0, values: types },
@@ -381,17 +384,15 @@ class DefaultExtension extends MProvider {
     }
     
     getSourcePreferences() {
-        return [
-            {
-                key: "hoster_selection",
-                multiSelectListPreference: {
-                    title: "اختر السيرفرات",
-                    summary: "اختر السيرفرات التي تريد ان تظهر",
-                    entries: ["DoodStream", "Okru", "StreamTape", "StreamWish", "Uqload", "VidBom", "Vidmoly", "Filemoon", "Lulustream"],
-                    entryValues: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream"],
-                    values: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream"],
-                }
+        return [{
+            key: "hoster_selection",
+            multiSelectListPreference: {
+                title: "اختر السيرفرات",
+                summary: "اختر السيرفرات التي تريد ان تظهر",
+                entries: ["DoodStream", "Okru", "StreamTape", "StreamWish/LION", "Uqload", "VidBom", "Vidmoly", "Filemoon", "Lulustream", "VK"],
+                entryValues: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk"],
+                values: ["dood", "okru", "streamtape", "streamwish", "uqload", "vidbom", "vidmoly", "filemoon", "lulustream", "vk"],
             }
-        ];
+        }];
     }
 }
