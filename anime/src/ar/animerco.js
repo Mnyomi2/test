@@ -31,7 +31,7 @@ class DefaultExtension extends MProvider {
 
     getHeaders(url) {
         return {
-            "Referer": this.getBaseUrl() + "/",
+            "Referer": url,
             "Origin": this.getBaseUrl(),
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
             "X-Requested-With": "XMLHttpRequest"
@@ -209,8 +209,7 @@ class DefaultExtension extends MProvider {
                 const embedUrl = JSON.parse(playerRes.body).embed_url.replace(/\\/g, "");
                 if (!embedUrl) return [];
 
-                let extractedVideos = [];
-                const genericVideo = { url: embedUrl, quality: this._formatQuality(serverName, embedUrl), headers: this._getVideoHeaders(embedUrl) };
+                const fallbackVideo = { url: embedUrl, quality: this._formatQuality(`${serverName} (WebView)`, embedUrl), headers: this._getVideoHeaders(embedUrl) };
                 
                 const streamwish_domains = ["streamwish", "megamax.me", "filelions", "iplayerhls", "mivalyo", "vidhidepro", "playerwish", "sfastwish"];
                 const dood_domains = ["dood", "ds2play", "dooodster", "d000d", "d-s.io"];
@@ -220,40 +219,63 @@ class DefaultExtension extends MProvider {
                 const vk_domains = ["vk.com", "vkvideo.ru"];
                 const ruby_domains = ["streamruby", "rubyvid"];
 
+                let extractedVideos = [];
+                let wasExtractorAttempted = false;
+
                 if (dood_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("dood")) {
-                    extractedVideos.push(genericVideo);
+                    wasExtractorAttempted = true;
+                    extractedVideos.push(fallbackVideo);
                 } else if ((embedUrl.includes("ok.ru") || embedUrl.includes("odnoklassniki")) && hosterSelection.includes("okru")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._okruExtractor(embedUrl, serverName);
                 } else if (embedUrl.includes("streamtape") && hosterSelection.includes("streamtape")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._streamtapeExtractor(embedUrl, serverName);
                 } else if (streamwish_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("streamwish")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._streamwishExtractor(embedUrl, serverName);
                 } else if (embedUrl.includes("uqload") && hosterSelection.includes("uqload")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._uqloadExtractor(embedUrl, serverName);
                 } else if (vidbom_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("vidbom")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._vidbomExtractor(embedUrl);
                 } else if ((embedUrl.includes("youdbox") || embedUrl.includes("yodbox")) && hosterSelection.includes("yodbox")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._yodboxExtractor(embedUrl);
                 } else if (embedUrl.includes("vidmoly") && hosterSelection.includes("vidmoly")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._vidmolyExtractor(embedUrl, serverName);
                 } else if (embedUrl.includes("filemoon") && hosterSelection.includes("filemoon")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._filemoonExtractor(embedUrl, serverName);
                 } else if (lulu_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("lulustream")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._lulustreamExtractor(embedUrl, serverName);
                 } else if (vk_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("vk")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._vkExtractor(embedUrl, serverName);
                 } else if (mixdrop_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("mixdrop")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._mixdropExtractor(embedUrl, serverName);
                 } else if (ruby_domains.some(d => embedUrl.includes(d)) && hosterSelection.includes("streamruby")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._streamrubyExtractor(embedUrl, serverName);
                 } else if (embedUrl.includes("upstream.to") && hosterSelection.includes("upstream")) {
+                    wasExtractorAttempted = true;
                     extractedVideos = await this._upstreamExtractor(embedUrl, serverName);
                 } else if (embedUrl.includes("mp4upload") && hosterSelection.includes("mp4upload")) {
-                    extractedVideos.push(genericVideo);
-                } else if (hosterSelection.includes("generic")) {
-                    extractedVideos.push(genericVideo);
+                    wasExtractorAttempted = true;
+                    extractedVideos.push(fallbackVideo);
                 }
-                return extractedVideos;
+                
+                if (wasExtractorAttempted) {
+                    return extractedVideos.length > 0 ? extractedVideos : [fallbackVideo];
+                } else if (hosterSelection.includes("generic")) {
+                    return [fallbackVideo];
+                }
+
+                return [];
             } catch (e) {
                 return [];
             }
@@ -267,6 +289,7 @@ class DefaultExtension extends MProvider {
         }
         return videos;
     }
+
 
     getFilterList() {
         return [];
