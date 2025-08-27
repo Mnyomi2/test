@@ -12,7 +12,6 @@ const mangayomiSources = [{
 }];
 
 
-
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -95,7 +94,7 @@ class DefaultExtension extends MProvider {
         const { list, hasNextPage } = await this.fetchAndParseCataloguePage(`/episode/page/${page}/`);
         const fixedList = list.map(item => ({
             ...item,
-            link: item.link.replace(/-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-.*$/, "").replace("/episode/", "/anime/")
+            link: item.link.replace(/-%d8%a7%d9%84%d8%ح%d9%84%d9%82%d8%a9-.*$/, "").replace("/episode/", "/anime/")
         }));
         return { list: fixedList, hasNextPage };
     }
@@ -145,7 +144,7 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
         const doc = new Document(res.body);
         const hosterSelection = this.getPreference("hoster_selection") || [];
-        const showDebugUrl = this.getPreference("show_stream_url_for_debugging");
+        const showEmbedUrl = this.getPreference("show_embed_url_in_quality");
         const videos = [];
 
         const extractorMap = [
@@ -171,8 +170,8 @@ class DefaultExtension extends MProvider {
         ];
 
         for (const element of doc.select('#episode-servers li a')) {
-            let streamUrl = element.attr('data-ep-url');
             try {
+                let streamUrl = element.attr('data-ep-url');
                 if (!streamUrl) continue;
                 streamUrl = streamUrl.replace(/&amp;/g, '&');
                 if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
@@ -188,31 +187,24 @@ class DefaultExtension extends MProvider {
                 if (extractor) {
                     const numericQuality = this.getNumericQuality(qualityText);
                     const serverName = extractor.key.charAt(0).toUpperCase() + extractor.key.slice(1);
-                    const qualityPrefix = extractor.useQuality ? `${serverName} - ${numericQuality}` : serverName;
+                    let qualityPrefix = extractor.useQuality ? `${serverName} - ${numericQuality}` : serverName;
+                    
+                    if (showEmbedUrl) {
+                        qualityPrefix += ` [${streamUrl}]`;
+                    }
                     
                     const extractedVideos = await extractor.func.call(this, streamUrl, qualityPrefix);
                     videos.push(...extractedVideos);
                 } else if (hosterSelection.includes("mega") && streamUrlLower.includes("mega.nz")) {
-                    videos.push({ url: streamUrl, quality: qualityText, headers: this._getVideoHeaders(streamUrl) });
+                    let quality = qualityText;
+                    if(showEmbedUrl) quality += ` [${streamUrl}]`;
+                    videos.push({ url: streamUrl, quality: quality, headers: this._getVideoHeaders(streamUrl) });
                 }
-            } catch (e) {
-                if (showDebugUrl) {
-                    videos.push({
-                        url: streamUrl,
-                        quality: `DEBUG: FAILED - ${streamUrl}`,
-                        headers: this._getVideoHeaders(streamUrl)
-                    });
-                }
-            }
+            } catch (e) { /* Silently continue */ }
         }
         
         const preferredQuality = this.getPreference("preferred_quality") || "720";
         videos.sort((a, b) => {
-            const isADebug = a.quality.startsWith("DEBUG");
-            const isBDebug = b.quality.startsWith("DEBUG");
-            if (isADebug && !isBDebug) return 1;
-            if (!isADebug && isBDebug) return -1;
-            
             const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0);
             const qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
             const isAPreferred = a.quality.includes(preferredQuality);
@@ -249,7 +241,7 @@ class DefaultExtension extends MProvider {
     async _mp4uploadExtractor(url, quality) {
         const embedHtml = (await this.client.get(url, this._getVideoHeaders(url))).body;
         const sourceMatch = embedHtml.match(/player\.src\({[^}]+src:\s*"([^"]+)"/);
-        return sourceMatch ? [{ url: sourceMatch[1], originalUrl: sourceMatch[1], quality, headers: { "Referer": url } }] : [];
+        return sourceMatch ? [{ url: sourceMatch[1], originalUrl: sourceMatch[1], quality: this._formatQuality(quality, sourceMatch[1]), headers: { "Referer": url } }] : [];
     }
 
     async _doodExtractor(url, quality) {
@@ -259,7 +251,7 @@ class DefaultExtension extends MProvider {
         const videoUrl = (await this.client.get(doodApi, this._getVideoHeaders(url))).body;
         const randomString = Math.random().toString(36).substring(7);
         const finalUrl = `${videoUrl}${randomString}?token=${passMd5.substring(passMd5.lastIndexOf('/') + 1)}`;
-        return [{ url: finalUrl, quality, originalUrl: finalUrl, headers: this._getVideoHeaders(url) }];
+        return [{ url: finalUrl, quality: this._formatQuality(quality, finalUrl), originalUrl: finalUrl, headers: this._getVideoHeaders(url) }];
     }
 
     async _voeExtractor(url) {
@@ -306,7 +298,7 @@ class DefaultExtension extends MProvider {
     async _uqloadExtractor(url, prefix) {
         const res = await this.client.get(url, this.getHeaders(url));
         const videoUrl = res.body.substringAfter('sources: ["').substringBefore('"]');
-        return videoUrl.startsWith("http") ? [{ url: videoUrl, quality: prefix, originalUrl: videoUrl, headers: this._getVideoHeaders("https://uqload.to/") }] : [];
+        return videoUrl.startsWith("http") ? [{ url: videoUrl, quality: this._formatQuality(prefix, videoUrl), originalUrl: videoUrl, headers: this._getVideoHeaders("https://uqload.to/") }] : [];
     }
 
     async _megamaxExtractor(url, prefix) {
@@ -325,39 +317,41 @@ class DefaultExtension extends MProvider {
         const body = res.body;
 
         const paramsJsonString = body.substringAfter("var playerParams = ").substringBefore("};") + "}";
-        if (!paramsJsonString) throw new Error("Could not find VK player params");
+        if (!paramsJsonString) return [];
 
-        const playerParams = JSON.parse(paramsJsonString);
-        const params = playerParams.params[0];
-        const videos = [];
-        const qualityMap = {
-            "1080p": params.url1080, "720p": params.url720, "480p": params.url480,
-            "360p": params.url360, "240p": params.url240, "144p": params.url144
-        };
-        
-        if (params.hls) {
-             videos.push({
-                url: params.hls, originalUrl: params.hls,
-                quality: `${prefix} Auto (HLS)`, headers: videoHeaders
-            });
-        }
+        try {
+            const playerParams = JSON.parse(paramsJsonString);
+            const params = playerParams.params[0];
+            const videos = [];
 
-        for (const [quality, videoUrl] of Object.entries(qualityMap)) {
-            if (videoUrl) {
-                videos.push({
-                    url: videoUrl, originalUrl: videoUrl,
-                    quality: `${prefix} ${quality}`, headers: videoHeaders
+            const qualityMap = {
+                "1080p": params.url1080, "720p": params.url720, "480p": params.url480,
+                "360p": params.url360, "240p": params.url240, "144p": params.url144
+            };
+            
+            if (params.hls) {
+                 videos.push({
+                    url: params.hls, originalUrl: params.hls,
+                    quality: this._formatQuality(`${prefix} Auto (HLS)`, params.hls), headers: videoHeaders
                 });
             }
-        }
-        if (videos.length === 0) throw new Error("No VK videos found from player params");
-        return videos;
+
+            for (const [quality, videoUrl] of Object.entries(qualityMap)) {
+                if (videoUrl) {
+                    videos.push({
+                        url: videoUrl, originalUrl: videoUrl,
+                        quality: this._formatQuality(`${prefix} ${quality}`, videoUrl), headers: videoHeaders
+                    });
+                }
+            }
+            return videos;
+        } catch (e) { return []; }
     }
 
     async _videaExtractor(url, quality) {
         const res = await this.client.get(url, this.getHeaders(url));
         const videoUrl = res.body.substringAfter("v.player.source(").substringBefore(");").match(/'(https?:\/\/[^']+)'/)?.[1];
-        return videoUrl ? [{ url: videoUrl, originalUrl: videoUrl, quality, headers: this._getVideoHeaders(url) }] : [];
+        return videoUrl ? [{ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(quality, videoUrl), headers: this._getVideoHeaders(url) }] : [];
     }
 
     async _dailymotionExtractor(url, prefix) {
@@ -372,7 +366,7 @@ class DefaultExtension extends MProvider {
     async _sendvidExtractor(url, quality) {
         const res = await this.client.get(url, this._getVideoHeaders(url));
         const videoUrl = new Document(res.body).selectFirst("source#source-video")?.getSrc;
-        return videoUrl ? [{ url: videoUrl, originalUrl: videoUrl, quality, headers: this._getVideoHeaders(url) }] : [];
+        return videoUrl ? [{ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(quality, videoUrl), headers: this._getVideoHeaders(url) }] : [];
     }
     
     async _streamtapeExtractor(url, quality) {
@@ -526,15 +520,15 @@ class DefaultExtension extends MProvider {
         }, {
             key: "show_video_url_in_quality",
             switchPreferenceCompat: {
-                title: "إظهار رابط الفيديو النهائي",
-                summary: "عرض رابط الفيديو المستخرج بجانب اسم الجودة.",
+                title: "إظهار رابط الفيديو",
+                summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة.",
                 value: false,
             }
         }, {
-            key: "show_stream_url_for_debugging",
+            key: "show_embed_url_in_quality",
             switchPreferenceCompat: {
-                title: "إظهار رابط السيرفر (للتصحيح)",
-                summary: "يعرض الرابط الأولي للسيرفر في حال فشل الاستخراج، للمساعدة في تصحيح الأخطاء.",
+                title: "إظهار رابط التضمين (للتصحيح)",
+                summary: "عرض رابط التضمين الأولي بجانب اسم الجودة (لأغراض التصحيح).",
                 value: false,
             }
         }];
