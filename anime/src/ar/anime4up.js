@@ -12,8 +12,6 @@ const mangayomiSources = [{
 }];
 
 
-
-
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -260,28 +258,34 @@ class DefaultExtension extends MProvider {
         return sourceMatch ? [{ url: sourceMatch[1], originalUrl: sourceMatch[1], quality: this._formatQuality(quality, sourceMatch[1]), headers: { "Referer": url } }] : [];
     }
 
-    async _doodExtractor(url, quality) {
-        const res = await this.client.get(url, { "Referer": "https://anime4up.rest/" });
-        const body = res.body;
-
-        const passMd5Match = body.match(/\/pass_md5\/([^'"]*)/);
+    async _doodExtractor(url, prefix) {
+        // --- CHANGE START ---
+        const headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+            "Referer": url
+        };
+        const res = await this.client.get(url, headers);
+        const passMd5Match = res.body.match(/\/pass_md5\/([^']*)'/);
         if (!passMd5Match) return [];
+
         const passMd5 = passMd5Match[1];
-
-        const doodApiUrl = `https://${new URL(url).hostname}/pass_md5/${passMd5}`;
-        const videoUrlBase = (await this.client.get(doodApiUrl, { "Referer": url })).body;
-
-        const token = passMd5.substring(passMd5.lastIndexOf('/') + 1);
+        const doodApi = `https://${new URL(url).hostname}/pass_md5/${passMd5}`;
+        const videoUrl = (await this.client.get(doodApi, headers)).body;
+        
         const randomString = Math.random().toString(36).substring(7);
+        const token = passMd5.substring(passMd5.lastIndexOf('/') + 1);
+        const finalUrl = `${videoUrl}${randomString}?token=${token}`;
 
-        const finalUrl = `${videoUrlBase}${randomString}?token=${token}&expiry=${Date.now()}`;
+        const serverName = prefix.split(' - ')[0].trim();
+        const qualityLabel = `${serverName} | API: ${doodApi} | Final: ${finalUrl}`;
         
         return [{
             url: finalUrl,
-            quality: this._formatQuality(quality, finalUrl),
+            quality: qualityLabel,
             originalUrl: finalUrl,
-            headers: { "Referer": url }
+            headers: headers 
         }];
+        // --- CHANGE END ---
     }
 
     async _voeExtractor(url) {
