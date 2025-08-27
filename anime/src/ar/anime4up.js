@@ -12,6 +12,8 @@ const mangayomiSources = [{
 }];
 
 
+
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -259,13 +261,27 @@ class DefaultExtension extends MProvider {
     }
 
     async _doodExtractor(url, quality) {
-        const res = await this.client.get(url, this._getVideoHeaders(url));
-        const passMd5 = res.body.substringAfter("/pass_md5/").substringBefore("'");
-        const doodApi = `https://${new URL(url).hostname}/pass_md5/${passMd5}`;
-        const videoUrl = (await this.client.get(doodApi, this._getVideoHeaders(url))).body;
+        const res = await this.client.get(url, { "Referer": "https://anime4up.rest/" });
+        const body = res.body;
+
+        const passMd5Match = body.match(/\/pass_md5\/([^'"]*)/);
+        if (!passMd5Match) return [];
+        const passMd5 = passMd5Match[1];
+
+        const doodApiUrl = `https://${new URL(url).hostname}/pass_md5/${passMd5}`;
+        const videoUrlBase = (await this.client.get(doodApiUrl, { "Referer": url })).body;
+
+        const token = passMd5.substring(passMd5.lastIndexOf('/') + 1);
         const randomString = Math.random().toString(36).substring(7);
-        const finalUrl = `${videoUrl}${randomString}?token=${passMd5.substring(passMd5.lastIndexOf('/') + 1)}`;
-        return [{ url: finalUrl, quality: this._formatQuality(quality, finalUrl), originalUrl: finalUrl, headers: this._getVideoHeaders(url) }];
+
+        const finalUrl = `${videoUrlBase}${randomString}?token=${token}&expiry=${Date.now()}`;
+        
+        return [{
+            url: finalUrl,
+            quality: this._formatQuality(quality, finalUrl),
+            originalUrl: finalUrl,
+            headers: { "Referer": url }
+        }];
     }
 
     async _voeExtractor(url) {
@@ -325,17 +341,25 @@ class DefaultExtension extends MProvider {
         return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : [];
     }
     
-    async _vkExtractor(url, prefix = "VK") {
-        const videoHeaders = { 
+    async _vkExtractor(url, prefix) {
+        const videoHeaders = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
             "Referer": url,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/536.36"
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "iframe",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "cross-site",
         };
-
         const res = await this.client.get(url, videoHeaders);
+        
+        const serverName = prefix.split(' - ')[0].trim();
+        
         const matches = [...res.body.matchAll(/"url(\d+)":"(.*?)"/g)];
         
         const videos = matches.map(match => {
-            const qualityLabel = `${prefix} ${match[1]}p`;
+            const qualityLabel = `${serverName} ${match[1]}p`;
             const videoUrl = match[2].replace(/\\/g, '');
             return {
                 url: videoUrl,
