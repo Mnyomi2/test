@@ -12,6 +12,7 @@ const mangayomiSources = [{
 }];
 
 
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -94,7 +95,7 @@ class DefaultExtension extends MProvider {
         const { list, hasNextPage } = await this.fetchAndParseCataloguePage(`/episode/page/${page}/`);
         const fixedList = list.map(item => ({
             ...item,
-            link: item.link.replace(/-%d8%a7%d9%84%d8%ح%d9%84%d9%82%d8%a9-.*$/, "").replace("/episode/", "/anime/")
+            link: item.link.replace(/-%d8%a7%d9%84%d8%ح%d9%84%d9%82%d8%aة-.*$/, "").replace("/episode/", "/anime/")
         }));
         return { list: fixedList, hasNextPage };
     }
@@ -258,47 +259,37 @@ class DefaultExtension extends MProvider {
         return sourceMatch ? [{ url: sourceMatch[1], originalUrl: sourceMatch[1], quality: this._formatQuality(quality, sourceMatch[1]), headers: { "Referer": url } }] : [];
     }
 
-    async _doodExtractor(url, quality) {
-        // Step 1: Get the embed page content
-        const res = await this.client.get(url, this._getVideoHeaders(url));
-        const body = res.body;
-
-        // Step 2: Extract the '/pass_md5/...' path from the script content
-        const passMd5Match = body.match(/\/pass_md5\/([^']+)/);
+    async _doodExtractor(url, prefix) {
+        const initialHeaders = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "Referer": this.getBaseUrl()
+        };
+        const res = await this.client.get(url, initialHeaders);
+        const passMd5Match = res.body.match(/\/pass_md5\/([^"']*)["']/);
         if (!passMd5Match) return [];
-        
-        const passMd5Path = passMd5Match[1];
-        
-        // Step 3: Construct the full API URL to get the video's base path
-        const doodApi = `https://${new URL(url).hostname}/pass_md5/${passMd5Path}`;
 
-        // Step 4: Extract the token from the end of the pass_md5 path
-        const token = passMd5Path.substring(passMd5Path.lastIndexOf('/') + 1);
-
-        // Step 5: Make the API call to get the video URL base
-        // This will return a URL like: https://.../randomstring~
-        const videoUrlBase = (await this.client.get(doodApi, { "Referer": url })).body;
+        const passMd5 = passMd5Match[1];
+        const doodApi = `https://${new URL(url).hostname}/pass_md5/${passMd5}`;
         
-        // Step 6: Replicate the 'makePlay()' function found in the page's script
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        let randomString = "";
-        for (let i = 0; i < 10; i++) {
-            randomString += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-
-        const expiry = Date.now();
-        const videoUrlSuffix = `${randomString}?token=${token}&expiry=${expiry}`;
-
-        // Step 7: Concatenate the base URL with the generated suffix to get the final playable link
-        const finalUrl = videoUrlBase + videoUrlSuffix;
+        const apiHeaders = { ...initialHeaders, "X-Requested-With": "XMLHttpRequest", "Referer": url };
+        const videoUrl = (await this.client.get(doodApi, apiHeaders)).body;
         
-        // Step 8: Return the video object
-        // The Referer header must be the embed page URL for the video to play
-        return [{ 
-            url: finalUrl, 
-            quality: this._formatQuality(quality, finalUrl), 
-            originalUrl: finalUrl, 
-            headers: { "Referer": url } 
+        const randomString = Math.random().toString(36).substring(7);
+        const token = passMd5.substring(passMd5.lastIndexOf('/') + 1);
+        const finalUrl = `${videoUrl}${randomString}?token=${token}`;
+        
+        return [{
+            url: finalUrl,
+            quality: this._formatQuality(prefix, finalUrl),
+            originalUrl: finalUrl,
+            headers: initialHeaders 
         }];
     }
 
