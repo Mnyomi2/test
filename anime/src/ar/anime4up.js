@@ -12,6 +12,7 @@ const mangayomiSources = [{
 }];
 
 
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -325,7 +326,7 @@ class DefaultExtension extends MProvider {
     }
     
     async _vkExtractor(url, prefix = "VK") {
-        const videoHeaders = { ...this._getVideoHeaders("https://vk.com/"), "Origin": "https://vk.com" };
+        const videoHeaders = { ...this._getVideoHeaders(url), "Origin": "https://vk.com" };
         const res = await this.client.get(url, videoHeaders);
         const paramsJsonMatch = res.body.match(/var playerParams = ({.*?});/s);
         if (!paramsJsonMatch || !paramsJsonMatch[1]) return [];
@@ -334,8 +335,8 @@ class DefaultExtension extends MProvider {
             const params = playerParams.params[0];
             const videos = [];
             const qualityMap = {
-                "1080p": params.url1080, "720p": params.url720, "480p": params.url480,
-                "360p": params.url360, "240p": params.url240, "144p": params.url144
+                "url1080": "1080p", "url720": "720p", "url480": "480p",
+                "url360": "360p", "url240": "240p", "url144": "144p"
             };
             if (params.hls) {
                  videos.push({
@@ -343,11 +344,11 @@ class DefaultExtension extends MProvider {
                     quality: this._formatQuality(`${prefix} Auto (HLS)`, params.hls), headers: videoHeaders
                 });
             }
-            for (const [quality, videoUrl] of Object.entries(qualityMap)) {
-                if (videoUrl) {
+            for (const [key, quality] of Object.entries(qualityMap)) {
+                if (params[key]) {
                     videos.push({
-                        url: videoUrl, originalUrl: videoUrl,
-                        quality: this._formatQuality(`${prefix} ${quality}`, videoUrl), headers: videoHeaders
+                        url: params[key], originalUrl: params[key],
+                        quality: this._formatQuality(`${prefix} ${quality}`, params[key]), headers: videoHeaders
                     });
                 }
             }
