@@ -11,7 +11,7 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/anime4up.js"
 }];
 
-
+ 
 
 // --- CLASS ---
 class DefaultExtension extends MProvider {
@@ -328,53 +328,33 @@ class DefaultExtension extends MProvider {
     async _vkExtractor(url, prefix = "VK") {
         const videoHeaders = { ...this._getVideoHeaders(url), "Origin": "https://vk.com" };
         const res = await this.client.get(url, videoHeaders);
-
-        // Ищем playerParams JSON
         const paramsJsonMatch = res.body.match(/var playerParams\s*=\s*(\{.*?\});/s);
-        if (!paramsJsonMatch) return [];
-
+        if (!paramsJsonMatch || !paramsJsonMatch[1]) return [];
         try {
             const playerParams = JSON.parse(paramsJsonMatch[1]);
             const params = playerParams?.params?.[0];
             if (!params) return [];
-
             const videos = [];
-
-            // HLS (если есть)
             if (params.hls) {
-                videos.push({
-                    url: params.hls,
-                    originalUrl: params.hls,
-                    quality: this._formatQuality(`${prefix} Auto (HLS)`, params.hls),
-                    headers: videoHeaders
+                 videos.push({
+                    url: params.hls, originalUrl: params.hls,
+                    quality: this._formatQuality(`${prefix} Auto (HLS)`, params.hls), headers: videoHeaders
                 });
             }
-
-            // Качества по прямым ссылкам
             const qualityMap = {
-                "1080p": params.url1080,
-                "720p": params.url720,
-                "480p": params.url480,
-                "360p": params.url360,
-                "240p": params.url240,
-                "144p": params.url144
+                "1080p": params.url1080, "720p": params.url720, "480p": params.url480,
+                "360p": params.url360, "240p": params.url240, "144p": params.url144
             };
-
             for (const [quality, videoUrl] of Object.entries(qualityMap)) {
                 if (videoUrl) {
                     videos.push({
-                        url: videoUrl,
-                        originalUrl: videoUrl,
-                        quality: this._formatQuality(`${prefix} ${quality}`, videoUrl),
-                        headers: videoHeaders
+                        url: videoUrl, originalUrl: videoUrl,
+                        quality: this._formatQuality(`${prefix} ${quality}`, videoUrl), headers: videoHeaders
                     });
                 }
             }
-
             return videos;
-        } catch (e) {
-            return [];
-        }
+        } catch (e) { return []; }
     }
 
     async _videaExtractor(url, quality) {
