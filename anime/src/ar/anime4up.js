@@ -34,7 +34,7 @@ class DefaultExtension extends MProvider {
         return {
             "Referer": this.getBaseUrl() + "/",
             "Origin": this.getBaseUrl(),
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/536.36"
         };
     }
     
@@ -327,72 +327,29 @@ class DefaultExtension extends MProvider {
     }
     
     async _vkExtractor(url, prefix = "VK") {
-        const videoHeaders = { ...this._getVideoHeaders(url), "Origin": "https://vk.com" };
+        const videoHeaders = { ...this._getVideoHeaders("https://vk.com/"), "Origin": "https://vk.com" };
         const res = await this.client.get(url, videoHeaders);
-        const body = res.body;
-        const videos = [];
-
-        // --- Method 1: playerParams JSON ---
-        try {
-            const paramsJsonMatch = body.match(/var\s+playerParams\s*=\s*(\{.*?\});/s);
-            if (paramsJsonMatch && paramsJsonMatch[1]) {
-                const playerParams = JSON.parse(paramsJsonMatch[1]);
-                const params = playerParams?.params?.[0];
-                if (params) {
-                    if (params.hls) {
-                        videos.push({
-                            url: params.hls,
-                            originalUrl: params.hls,
-                            quality: this._formatQuality(`${prefix} Auto (HLS)`, params.hls),
-                            headers: videoHeaders
-                        });
-                    }
-                    const qualityMap = {
-                        "1080p": params.url1080,
-                        "720p": params.url720,
-                        "480p": params.url480,
-                        "360p": params.url360,
-                        "240p": params.url240,
-                        "144p": params.url144
-                    };
-                    for (const [quality, videoUrl] of Object.entries(qualityMap)) {
-                        if (videoUrl) {
-                            videos.push({
-                                url: videoUrl,
-                                originalUrl: videoUrl,
-                                quality: this._formatQuality(`${prefix} ${quality}`, videoUrl),
-                                headers: videoHeaders
-                            });
-                        }
-                    }
-                    if (videos.length > 0) return videos;
-                }
-            }
-        } catch (e) {
-            // fallback if JSON parsing fails
-        }
-
-        // --- Method 2: Regex for url<quality> ---
-        const matches = [...body.matchAll(/"url(\d+)":"(.*?)"/g)];
-        for (const match of matches) {
-            const quality = `${prefix} ${match[1]}p`;
+        const matches = [...res.body.matchAll(/"url(\d+)":"(.*?)"/g)];
+        
+        const videos = matches.map(match => {
+            const qualityLabel = `${prefix} ${match[1]}p`;
             const videoUrl = match[2].replace(/\\/g, '');
-            videos.push({
+            return {
                 url: videoUrl,
                 originalUrl: videoUrl,
-                quality: this._formatQuality(quality, videoUrl),
+                quality: this._formatQuality(qualityLabel, videoUrl),
                 headers: videoHeaders
-            });
-        }
-        if (videos.length > 0) return videos;
+            };
+        });
 
-        // --- Method 3: Fallback for m3u8 links directly ---
-        const hlsMatch = body.match(/"(https:[^"]+\.m3u8[^"]*)"/);
-        if (hlsMatch) {
-            return await this._parseM3U8(hlsMatch[1], prefix, videoHeaders);
-        }
-
-        return [];
+        // Sort by quality descending
+        videos.sort((a, b) => {
+            const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0);
+            const qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
+            return qualityB - qualityA;
+        });
+        
+        return videos;
     }
 
     async _videaExtractor(url, quality) {
