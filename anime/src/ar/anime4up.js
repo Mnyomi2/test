@@ -12,6 +12,7 @@ const mangayomiSources = [{
 }];
 
 
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -327,18 +328,53 @@ class DefaultExtension extends MProvider {
     async _vkExtractor(url, prefix = "VK") {
         const videoHeaders = { ...this._getVideoHeaders(url), "Origin": "https://vk.com" };
         const res = await this.client.get(url, videoHeaders);
-        const matches = [...res.body.matchAll(/"url(\d+)":"(.*?)"/g)];
-        if (matches.length === 0) return [];
-        const videos = matches.map(match => {
-            const qualityLabel = `${prefix} ${match[1]}p`;
-            const videoUrl = match[2].replace(/\\/g, '');
-            return {
-                url: videoUrl, originalUrl: videoUrl,
-                quality: this._formatQuality(qualityLabel, videoUrl),
-                headers: videoHeaders
+
+        // Ищем playerParams JSON
+        const paramsJsonMatch = res.body.match(/var playerParams\s*=\s*(\{.*?\});/s);
+        if (!paramsJsonMatch) return [];
+
+        try {
+            const playerParams = JSON.parse(paramsJsonMatch[1]);
+            const params = playerParams?.params?.[0];
+            if (!params) return [];
+
+            const videos = [];
+
+            // HLS (если есть)
+            if (params.hls) {
+                videos.push({
+                    url: params.hls,
+                    originalUrl: params.hls,
+                    quality: this._formatQuality(`${prefix} Auto (HLS)`, params.hls),
+                    headers: videoHeaders
+                });
+            }
+
+            // Качества по прямым ссылкам
+            const qualityMap = {
+                "1080p": params.url1080,
+                "720p": params.url720,
+                "480p": params.url480,
+                "360p": params.url360,
+                "240p": params.url240,
+                "144p": params.url144
             };
-        });
-        return videos.reverse();
+
+            for (const [quality, videoUrl] of Object.entries(qualityMap)) {
+                if (videoUrl) {
+                    videos.push({
+                        url: videoUrl,
+                        originalUrl: videoUrl,
+                        quality: this._formatQuality(`${prefix} ${quality}`, videoUrl),
+                        headers: videoHeaders
+                    });
+                }
+            }
+
+            return videos;
+        } catch (e) {
+            return [];
+        }
     }
 
     async _videaExtractor(url, quality) {
