@@ -327,8 +327,21 @@ class DefaultExtension extends MProvider {
     }
     
     async _vkExtractor(url, prefix = "VK") {
-        const videoHeaders = { ...this._getVideoHeaders("https://vk.com/"), "Origin": "https://vk.com" };
-        const res = await this.client.get(url, videoHeaders);
+        // Headers to mimic a direct browser request to get the page content
+        const vkPageHeaders = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0"
+        };
+        // Headers for playing the actual video stream (needs a Referer)
+        const vkStreamHeaders = { "Referer": "https://vk.com/" };
+        
+        const res = await this.client.get(url, vkPageHeaders);
         const matches = [...res.body.matchAll(/"url(\d+)":"(.*?)"/g)];
         
         const videos = matches.map(match => {
@@ -338,7 +351,7 @@ class DefaultExtension extends MProvider {
                 url: videoUrl,
                 originalUrl: videoUrl,
                 quality: this._formatQuality(qualityLabel, videoUrl),
-                headers: videoHeaders
+                headers: vkStreamHeaders
             };
         });
 
