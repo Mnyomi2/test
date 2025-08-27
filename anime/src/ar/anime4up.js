@@ -12,7 +12,6 @@ const mangayomiSources = [{
 }];
 
 
-
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -328,32 +327,18 @@ class DefaultExtension extends MProvider {
     async _vkExtractor(url, prefix = "VK") {
         const videoHeaders = { ...this._getVideoHeaders(url), "Origin": "https://vk.com" };
         const res = await this.client.get(url, videoHeaders);
-        const paramsJsonMatch = res.body.match(/var playerParams = ({.*?});/s);
-        if (!paramsJsonMatch || !paramsJsonMatch[1]) return [];
-        try {
-            const playerParams = JSON.parse(paramsJsonMatch[1]);
-            const params = playerParams.params[0];
-            const videos = [];
-            const qualityMap = {
-                "url1080": "1080p", "url720": "720p", "url480": "480p",
-                "url360": "360p", "url240": "240p", "url144": "144p"
+        const matches = [...res.body.matchAll(/"url(\d+)":"(.*?)"/g)];
+        if (matches.length === 0) return [];
+        const videos = matches.map(match => {
+            const qualityLabel = `${prefix} ${match[1]}p`;
+            const videoUrl = match[2].replace(/\\/g, '');
+            return {
+                url: videoUrl, originalUrl: videoUrl,
+                quality: this._formatQuality(qualityLabel, videoUrl),
+                headers: videoHeaders
             };
-            if (params.hls) {
-                 videos.push({
-                    url: params.hls, originalUrl: params.hls,
-                    quality: this._formatQuality(`${prefix} Auto (HLS)`, params.hls), headers: videoHeaders
-                });
-            }
-            for (const [key, quality] of Object.entries(qualityMap)) {
-                if (params[key]) {
-                    videos.push({
-                        url: params[key], originalUrl: params[key],
-                        quality: this._formatQuality(`${prefix} ${quality}`, params[key]), headers: videoHeaders
-                    });
-                }
-            }
-            return videos;
-        } catch (e) { return []; }
+        });
+        return videos.reverse();
     }
 
     async _videaExtractor(url, quality) {
