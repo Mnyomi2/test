@@ -11,8 +11,7 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/anime4up.js"
 }];
 
-
-
+ 
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -54,22 +53,18 @@ class DefaultExtension extends MProvider {
         const url = this.getBaseUrl() + path;
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
-
         const list = [];
-        const items = doc.select(".anime-card-container, div.row.posts-row article");
-
-        for (const item of items) {
+        for (const item of doc.select(".anime-card-container, div.row.posts-row article")) {
             const linkElement = item.selectFirst("div.anime-card-title h3 a, h3.post-title a");
             const imageElement = item.selectFirst("img.img-responsive");
-
             if (linkElement && imageElement) {
-                const name = linkElement.text.trim();
-                const link = linkElement.getHref.replace(/^https?:\/\/[^\/]+/, '');
-                const imageUrl = imageElement.getSrc;
-                list.push({ name, imageUrl, link });
+                list.push({
+                    name: linkElement.text.trim(),
+                    link: linkElement.getHref.replace(/^https?:\/\/[^\/]+/, ''),
+                    imageUrl: imageElement.getSrc
+                });
             }
         }
-
         const hasNextPage = doc.selectFirst("ul.pagination li a[href*='page='], a.next.page-numbers") != null;
         return { list, hasNextPage };
     }
@@ -83,27 +78,22 @@ class DefaultExtension extends MProvider {
     }
     
     _formatQuality(baseQuality, url = null) {
-        // This is a simple version to support the Okru extractor.
         return baseQuality;
     }
 
     // --- CORE METHODS ---
 
     async getPopular(page) {
-        const path = `/قائمة-الانمي/page/${page}/`;
-        return this.fetchAndParseCataloguePage(path);
+        return this.fetchAndParseCataloguePage(`/قائمة-الانمي/page/${page}/`);
     }
 
     async getLatestUpdates(page) {
-        const path = `/episode/page/${page}/`;
-        const result = await this.fetchAndParseCataloguePage(path);
-        const fixedList = result.list.map(item => ({
+        const { list, hasNextPage } = await this.fetchAndParseCataloguePage(`/episode/page/${page}/`);
+        const fixedList = list.map(item => ({
             ...item,
-            link: item.link
-                .replace(/-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-.*$/, "")
-                .replace("/episode/", "/anime/")
+            link: item.link.replace(/-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-.*$/, "").replace("/episode/", "/anime/")
         }));
-        return { list: fixedList, hasNextPage: result.hasNextPage };
+        return { list: fixedList, hasNextPage };
     }
 
     async search(query, page, filters) {
@@ -111,23 +101,22 @@ class DefaultExtension extends MProvider {
         if (query) {
             urlPath = `/?search_param=animes&s=${encodeURIComponent(query)}&paged=${page}`;
         } else {
-            const sectionFilter = filters.find(f => f.name === "القسم");
-            const genreFilter = filters.find(f => f.name === "تصنيف الأنمي");
-            const statusFilter = filters.find(f => f.name === "حالة الأنمي");
-            const typeFilter = filters.find(f => f.name === "النوع");
-            const seasonFilter = filters.find(f => f.name === "الموسم");
+            const findFilter = (name) => filters.find(f => f.name === name);
+            const getFilterValue = (filter) => filter && filter.state > 0 ? filter.values[filter.state].value : null;
+
+            const section = getFilterValue(findFilter("القسم"));
+            const genre = getFilterValue(findFilter("تصنيف الأنمي"));
+            const status = getFilterValue(findFilter("حالة الأنمي"));
+            const type = getFilterValue(findFilter("النوع"));
+            const season = getFilterValue(findFilter("الموسم"));
+
             let basePath = "";
-            if (sectionFilter && sectionFilter.state > 0) {
-                basePath = `/anime-category/${sectionFilter.values[sectionFilter.state].value}/`;
-            } else if (genreFilter && genreFilter.state > 0) {
-                basePath = `/anime-genre/${genreFilter.values[genreFilter.state].value}/`;
-            } else if (statusFilter && statusFilter.state > 0) {
-                basePath = `/anime-status/${statusFilter.values[statusFilter.state].value}/`;
-            } else if (typeFilter && typeFilter.state > 0) {
-                basePath = `/anime-type/${typeFilter.values[typeFilter.state].value}/`;
-            } else if (seasonFilter && seasonFilter.state > 0) {
-                basePath = `/anime-season/${seasonFilter.values[seasonFilter.state].value}/`;
-            }
+            if (section) basePath = `/anime-category/${section}/`;
+            else if (genre) basePath = `/anime-genre/${genre}/`;
+            else if (status) basePath = `/anime-status/${status}/`;
+            else if (type) basePath = `/anime-type/${type}/`;
+            else if (season) basePath = `/anime-season/${season}/`;
+            
             urlPath = basePath ? `${basePath}?page=${page}` : `/قائمة-الانمي/page/${page}/`;
         }
         return this.fetchAndParseCataloguePage(urlPath);
@@ -162,19 +151,15 @@ class DefaultExtension extends MProvider {
             try {
                 let streamUrl = element.attr('data-ep-url');
                 if (!streamUrl) continue;
-
-                // FIX: Decode HTML entities like &amp; to &
-                streamUrl = streamUrl.replace(/&amp;/g, "&");
-
+                streamUrl = streamUrl.replace(/&amp;/g, '&');
                 if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
                 if (streamUrl.includes("vidmoly.to")) streamUrl = streamUrl.replace("vidmoly.to", "vidmoly.net");
 
                 const qualityText = element.text.trim();
                 const numericQuality = this.getNumericQuality(qualityText);
                 const serverName = qualityText.split(' - ')[0].trim();
-                
-                let extractedVideos = [];
                 const streamUrlLower = streamUrl.toLowerCase();
+                let extractedVideos = [];
 
                 if (hosterSelection.includes("Mp4upload") && streamUrlLower.includes("mp4upload")) {
                     extractedVideos = await this._mp4uploadExtractor(streamUrl, `Mp4upload - ${numericQuality}`);
@@ -183,17 +168,21 @@ class DefaultExtension extends MProvider {
                 } else if (hosterSelection.includes("Okru") && (streamUrlLower.includes("ok.ru") || streamUrlLower.includes("odnoklassniki"))) {
                     extractedVideos = await this._okruExtractor(streamUrl, `Ok.ru`);
                 } else if (hosterSelection.includes("Voe") && streamUrlLower.includes("voe.sx")) {
-                    extractedVideos = await this._voeExtractor(streamUrl, `Voe.sx - ${numericQuality}`);
+                    extractedVideos = await this._voeExtractor(streamUrl);
                 } else if (hosterSelection.includes("Vidmoly") && streamUrlLower.includes("vidmoly")) {
-                    extractedVideos = await this._vidmolyExtractor(streamUrl, `Vidmoly - ${numericQuality}`);
+                    extractedVideos = await this._vidmolyExtractor(streamUrl, `Vidmoly`);
                 } else if (hosterSelection.includes("Uqload") && streamUrlLower.includes("uqload")) {
                     extractedVideos = await this._uqloadExtractor(streamUrl, `Uqload - ${numericQuality}`);
                 } else if (hosterSelection.includes("MegaMax") && streamUrlLower.includes("megamax")) {
-                    extractedVideos = await this._megamaxExtractor(streamUrl, `MegaMax - ${numericQuality}`);
+                    extractedVideos = await this._megamaxExtractor(streamUrl, `MegaMax`);
                 } else if (hosterSelection.includes("VK") && (streamUrlLower.includes("vk.com") || streamUrlLower.includes("vkvideo.ru"))) {
                     extractedVideos = await this._vkExtractor(streamUrl, `VK`);
                 } else if (hosterSelection.includes("Videa") && streamUrlLower.includes("videa.hu")) {
                     extractedVideos = await this._videaExtractor(streamUrl, `Videa - ${numericQuality}`);
+                } else if (hosterSelection.includes("Dailymotion") && streamUrlLower.includes("dailymotion")) {
+                    extractedVideos = await this._dailymotionExtractor(streamUrl, `Dailymotion`);
+                } else if (hosterSelection.includes("Sendvid") && streamUrlLower.includes("sendvid")) {
+                    extractedVideos = await this._sendvidExtractor(streamUrl, `Sendvid - ${numericQuality}`);
                 } else if (hosterSelection.includes("Mega") && streamUrlLower.includes("mega.nz")) {
                     videos.push({ url: streamUrl, quality: `${serverName} - ${numericQuality}`, headers: genericVideoHeaders });
                 }
@@ -208,9 +197,7 @@ class DefaultExtension extends MProvider {
             const qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
             const isAPreferred = a.quality.includes(preferredQuality);
             const isBPreferred = b.quality.includes(preferredQuality);
-            const scoreA = qualityA + (isAPreferred ? 10000 : 0);
-            const scoreB = qualityB + (isBPreferred ? 10000 : 0);
-            return scoreB - scoreA;
+            return (qualityB + (isBPreferred ? 10000 : 0)) - (qualityA + (isAPreferred ? 10000 : 0));
         });
         return videos;
     }
@@ -226,7 +213,7 @@ class DefaultExtension extends MProvider {
             for (let i = 0; i < lines.length; i++) {
                 if (lines[i].startsWith("#EXT-X-STREAM-INF")) {
                     const resolution = lines[i].match(/RESOLUTION=(\d+x\d+)/)?.[1];
-                    let quality = resolution ? resolution.split('x')[1] + "p" : "Unknown";
+                    const quality = resolution ? resolution.split('x')[1] + "p" : "Unknown";
                     let videoUrl = lines[++i];
                     if (videoUrl && !videoUrl.startsWith('http')) videoUrl = baseUrl + videoUrl;
                     if (videoUrl) videos.push({ url: videoUrl, originalUrl: videoUrl, quality: `${prefix} ${quality}`, headers });
@@ -253,7 +240,7 @@ class DefaultExtension extends MProvider {
         return [{ url: finalUrl, quality, originalUrl: finalUrl, headers: this._getVideoHeaders(url) }];
     }
 
-    async _voeExtractor(url, quality) {
+    async _voeExtractor(url) {
         const res = await this.client.get(url, this._getVideoHeaders(url));
         const hlsUrl = res.body.substringAfter("'hls': '").substringBefore("'");
         return hlsUrl ? this._parseM3U8(hlsUrl, "Voe.sx") : [];
@@ -263,33 +250,26 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(url, this.getHeaders(url));
         const dataOptions = res.body.substringAfter("data-options=\"").substringBefore("\"");
         if (!dataOptions) return [];
-        const videoHeaders = this._getVideoHeaders("https://ok.ru/");
-        videoHeaders["Origin"] = "https://ok.ru";
+        const videoHeaders = { ...this._getVideoHeaders("https://ok.ru/"), "Origin": "https://ok.ru" };
         try {
-            const json = JSON.parse(dataOptions.replace(/&quot;/g, '"'));
-            const metadata = JSON.parse(json.flashvars.metadata);
+            const metadata = JSON.parse(JSON.parse(dataOptions.replace(/&quot;/g, '"')).flashvars.metadata);
             const videos = [];
-            const getQualityName = (name) => ({ "full": "1080p", "hd": "720p", "sd": "480p", "low": "360p", "lowest": "240p", "mobile": "144p" }[name] || name);
+            const getQualityName = (n) => ({ "full": "1080p", "hd": "720p", "sd": "480p", "low": "360p", "lowest": "240p", "mobile": "144p" }[n] || n);
             if (metadata.videos) {
-                videos.push(...metadata.videos.map(video => ({
-                    url: video.url,
-                    originalUrl: video.url,
-                    quality: this._formatQuality(`${prefix} ${getQualityName(video.name)}`, video.url),
-                    headers: videoHeaders
+                videos.push(...metadata.videos.map(v => ({
+                    url: v.url, originalUrl: v.url, headers: videoHeaders,
+                    quality: this._formatQuality(`${prefix} ${getQualityName(v.name)}`, v.url),
                 })));
             }
             if (metadata.hlsManifestUrl) {
                 videos.unshift({
-                    url: metadata.hlsManifestUrl,
-                    originalUrl: metadata.hlsManifestUrl,
+                    url: metadata.hlsManifestUrl, originalUrl: metadata.hlsManifestUrl, headers: videoHeaders,
                     quality: this._formatQuality(`${prefix} Auto (HLS)`, metadata.hlsManifestUrl),
-                    headers: videoHeaders
                 });
             }
             if (videos.length > 1) {
-                const autoOption = videos.shift();
-                videos.reverse();
-                videos.unshift(autoOption);
+                const auto = videos.shift();
+                videos.reverse().unshift(auto);
             }
             return videos;
         } catch (e) { return []; }
@@ -330,8 +310,24 @@ class DefaultExtension extends MProvider {
     async _videaExtractor(url, quality) {
         const res = await this.client.get(url, this.getHeaders(url));
         const videoUrl = res.body.substringAfter("v.player.source(").substringBefore(");").match(/'(https?:\/\/[^']+)'/)?.[1];
-        return videoUrl ? [{ url: videoUrl, originalUrl: videoUrl, quality: quality, headers: this._getVideoHeaders(url) }] : [];
+        return videoUrl ? [{ url: videoUrl, originalUrl: videoUrl, quality, headers: this._getVideoHeaders(url) }] : [];
     }
+
+    async _dailymotionExtractor(url, prefix) {
+        const res = await this.client.get(url, this._getVideoHeaders(url));
+        const jsonConfig = res.body.substringAfter('"config":').substringBefore('});</script>');
+        if (!jsonConfig) return [];
+        const metadata = JSON.parse(jsonConfig).metadata;
+        const masterUrl = metadata?.qualities?.auto?.[0]?.url;
+        return (masterUrl && masterUrl.includes(".m3u8")) ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : [];
+    }
+
+    async _sendvidExtractor(url, quality) {
+        const res = await this.client.get(url, this._getVideoHeaders(url));
+        const videoUrl = new Document(res.body).selectFirst("source#source-video")?.getSrc;
+        return videoUrl ? [{ url: videoUrl, originalUrl: videoUrl, quality, headers: this._getVideoHeaders(url) }] : [];
+    }
+
 
     // --- FILTERS AND PREFERENCES ---
 
@@ -365,9 +361,9 @@ class DefaultExtension extends MProvider {
             multiSelectListPreference: {
                 title: "اختر السيرفرات",
                 summary: "اختر السيرفرات التي تريد ان تظهر",
-                entries: ["DoodStream", "Voe.sx", "Mp4upload", "Ok.ru", "Vidmoly", "Uqload", "MegaMax", "VK", "Videa", "Mega.nz (WebView only)"],
-                entryValues: ["Dood", "Voe", "Mp4upload", "Okru", "Vidmoly", "Uqload", "MegaMax", "VK", "Videa", "Mega"],
-                values: ["Dood", "Voe", "Mp4upload", "Okru", "Vidmoly", "Uqload", "MegaMax", "VK", "Videa", "Mega"],
+                entries: ["DoodStream", "Voe.sx", "Mp4upload", "Ok.ru", "Vidmoly", "Uqload", "MegaMax", "VK", "Videa", "Dailymotion", "Sendvid", "Mega.nz (WebView only)"],
+                entryValues: ["Dood", "Voe", "Mp4upload", "Okru", "Vidmoly", "Uqload", "MegaMax", "VK", "Videa", "Dailymotion", "Sendvid", "Mega"],
+                values: ["Dood", "Voe", "Mp4upload", "Okru", "Vidmoly", "Uqload", "MegaMax", "VK", "Videa", "Dailymotion", "Sendvid", "Mega"],
             }
         }];
     }
