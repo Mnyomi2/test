@@ -11,6 +11,8 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/anime4up.js"
 }];
 
+
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -142,8 +144,9 @@ class DefaultExtension extends MProvider {
     async getVideoList(url) {
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
         const doc = new Document(res.body);
-        let videos = [];
         const hosterSelection = this.getPreference("hoster_selection") || [];
+        const showDebugUrl = this.getPreference("show_stream_url_for_debugging");
+        const videos = [];
 
         const extractorMap = [
             { key: 'mp4upload',  domains: ['mp4upload'],      func: this._mp4uploadExtractor,  useQuality: true },
@@ -168,8 +171,8 @@ class DefaultExtension extends MProvider {
         ];
 
         for (const element of doc.select('#episode-servers li a')) {
+            let streamUrl = element.attr('data-ep-url');
             try {
-                let streamUrl = element.attr('data-ep-url');
                 if (!streamUrl) continue;
                 streamUrl = streamUrl.replace(/&amp;/g, '&');
                 if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
@@ -192,11 +195,24 @@ class DefaultExtension extends MProvider {
                 } else if (hosterSelection.includes("mega") && streamUrlLower.includes("mega.nz")) {
                     videos.push({ url: streamUrl, quality: qualityText, headers: this._getVideoHeaders(streamUrl) });
                 }
-            } catch (e) { /* Silently continue */ }
+            } catch (e) {
+                if (showDebugUrl) {
+                    videos.push({
+                        url: streamUrl,
+                        quality: `DEBUG: FAILED - ${streamUrl}`,
+                        headers: this._getVideoHeaders(streamUrl)
+                    });
+                }
+            }
         }
         
         const preferredQuality = this.getPreference("preferred_quality") || "720";
         videos.sort((a, b) => {
+            const isADebug = a.quality.startsWith("DEBUG");
+            const isBDebug = b.quality.startsWith("DEBUG");
+            if (isADebug && !isBDebug) return 1;
+            if (!isADebug && isBDebug) return -1;
+            
             const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0);
             const qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
             const isAPreferred = a.quality.includes(preferredQuality);
@@ -309,37 +325,33 @@ class DefaultExtension extends MProvider {
         const body = res.body;
 
         const paramsJsonString = body.substringAfter("var playerParams = ").substringBefore("};") + "}";
-        if (!paramsJsonString) return [];
+        if (!paramsJsonString) throw new Error("Could not find VK player params");
 
-        try {
-            const playerParams = JSON.parse(paramsJsonString);
-            const params = playerParams.params[0];
-            const videos = [];
+        const playerParams = JSON.parse(paramsJsonString);
+        const params = playerParams.params[0];
+        const videos = [];
+        const qualityMap = {
+            "1080p": params.url1080, "720p": params.url720, "480p": params.url480,
+            "360p": params.url360, "240p": params.url240, "144p": params.url144
+        };
+        
+        if (params.hls) {
+             videos.push({
+                url: params.hls, originalUrl: params.hls,
+                quality: `${prefix} Auto (HLS)`, headers: videoHeaders
+            });
+        }
 
-            const qualityMap = {
-                "1080p": params.url1080, "720p": params.url720, "480p": params.url480,
-                "360p": params.url360, "240p": params.url240, "144p": params.url144
-            };
-            
-            if (params.hls) {
-                 videos.push({
-                    url: params.hls, originalUrl: params.hls,
-                    quality: `${prefix} Auto (HLS)`, headers: videoHeaders
+        for (const [quality, videoUrl] of Object.entries(qualityMap)) {
+            if (videoUrl) {
+                videos.push({
+                    url: videoUrl, originalUrl: videoUrl,
+                    quality: `${prefix} ${quality}`, headers: videoHeaders
                 });
             }
-
-            for (const [quality, videoUrl] of Object.entries(qualityMap)) {
-                if (videoUrl) {
-                    videos.push({
-                        url: videoUrl, originalUrl: videoUrl,
-                        quality: `${prefix} ${quality}`, headers: videoHeaders
-                    });
-                }
-            }
-            return videos;
-        } catch (e) {
-            return [];
         }
+        if (videos.length === 0) throw new Error("No VK videos found from player params");
+        return videos;
     }
 
     async _videaExtractor(url, quality) {
@@ -514,8 +526,15 @@ class DefaultExtension extends MProvider {
         }, {
             key: "show_video_url_in_quality",
             switchPreferenceCompat: {
-                title: "إظهار رابط الفيديو",
-                summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة.",
+                title: "إظهار رابط الفيديو النهائي",
+                summary: "عرض رابط الفيديو المستخرج بجانب اسم الجودة.",
+                value: false,
+            }
+        }, {
+            key: "show_stream_url_for_debugging",
+            switchPreferenceCompat: {
+                title: "إظهار رابط السيرفر (للتصحيح)",
+                summary: "يعرض الرابط الأولي للسيرفر في حال فشل الاستخراج، للمساعدة في تصحيح الأخطاء.",
                 value: false,
             }
         }];
