@@ -12,7 +12,6 @@ const mangayomiSources = [{
 }];
 
 
-
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -72,7 +71,7 @@ class DefaultExtension extends MProvider {
 
     getNumericQuality(quality) {
         const q = quality.toLowerCase();
-        if (q.includes("fhd") || q.includes("1080")) return "1080p";
+        if (q.includes("fhd") || q.includes("1080") || q.includes("1040")) return "1080p";
         if (q.includes("hd") || q.includes("720")) return "720p";
         if (q.includes("sd") || q.includes("480")) return "480p";
         return "720p"; // Default quality
@@ -161,7 +160,7 @@ class DefaultExtension extends MProvider {
             { key: 'dailymotion',domains: ['dailymotion'],    func: this._dailymotionExtractor,useQuality: false },
             { key: 'sendvid',    domains: ['sendvid'],        func: this._sendvidExtractor,    useQuality: true },
             { key: 'streamtape', domains: ['streamtape'],     func: this._streamtapeExtractor, useQuality: true },
-            { key: 'streamwish', domains: ['streamwish', 'filelions', 'streamvid', 'wolfstream', 'embedsito', 'mivalyo', 'vidguard', 'bigwarp', 'filemoon'], func: this._streamwishExtractor, useQuality: false },
+            { key: 'streamwish', domains: ['streamwish', 'filelions', 'streamvid', 'wolfstream', 'embedsito', 'mivalyo', 'vidguard', 'bigwarp', 'filemoon', 'darkibox', 'hexload'], func: this._streamwishExtractor, useQuality: false },
             { key: 'vidbom',     domains: ['vidbom', 'vidbam', 'vbshar', 'vdbtm'], func: this._vidbomExtractor, useQuality: false },
             { key: 'lulustream', domains: ['luluvid', 'luluvdo'], func: this._lulustreamExtractor, useQuality: false },
             { key: 'mixdrop',    domains: ['mixdrop', 'mxdrop'], func: this._mixdropExtractor,  useQuality: true },
@@ -314,6 +313,7 @@ class DefaultExtension extends MProvider {
 
     async _megamaxExtractor(url, prefix) {
         const allVideos = [];
+        const showEmbedUrl = this.getPreference("show_embed_url_in_quality");
         try {
             const mainPageRes = await this.client.get(url, this._getVideoHeaders(url));
             const dataPageJson = new Document(mainPageRes.body).selectFirst("#app")?.attr("data-page");
@@ -323,22 +323,36 @@ class DefaultExtension extends MProvider {
             const apiRes = await this.client.get(url, apiHeaders);
             const apiData = JSON.parse(apiRes.body);
             if (apiData?.props?.streams?.status !== "success") return [];
+            
             const driverToExtractor = {
-                'mp4upload':  { func: this._mp4uploadExtractor,  useQuality: true }, 'doodstream': { func: this._doodExtractor, useQuality: true }, 'voe': { func: this._voeExtractor, useQuality: false }, 'streamwish': { func: this._streamwishExtractor, useQuality: false }, 'filemoon':   { func: this._streamwishExtractor, useQuality: false }, 'bigwarp': { func: this._streamwishExtractor, useQuality: false }, 'vidguard':   { func: this._streamwishExtractor, useQuality: false }, 'vidhide':    { func: this._streamwishExtractor, useQuality: false }, 'lulustream': { func: this._lulustreamExtractor, useQuality: false }, 'vadbam':     { func: this._vidbomExtractor,     useQuality: false }, 'streamtape': { func: this._streamtapeExtractor, useQuality: true }, 'mixdrop':    { func: this._mixdropExtractor,    useQuality: true }, 'krakenfiles':{ func: this._krakenfilesExtractor,useQuality: true }, 'veev':       { func: this._upstreamExtractor,   useQuality: false}, 'thetube':    { func: this._thetubeExtractor,    useQuality: false},
+                'mp4upload': { func: this._mp4uploadExtractor, useQuality: true }, 'doodstream': { func: this._doodExtractor, useQuality: true }, 'voe': { func: this._voeExtractor, useQuality: false }, 'streamwish': { func: this._streamwishExtractor, useQuality: false }, 'filemoon': { func: this._streamwishExtractor, useQuality: false }, 'bigwarp': { func: this._streamwishExtractor, useQuality: false }, 'vidguard': { func: this._streamwishExtractor, useQuality: false }, 'vidhide': { func: this._streamwishExtractor, useQuality: false }, 'darkibox': { func: this._streamwishExtractor, useQuality: false }, 'hexupload': { func: this._streamwishExtractor, useQuality: false }, 'lulustream': { func: this._lulustreamExtractor, useQuality: false }, 'vadbam': { func: this._vidbomExtractor, useQuality: false }, 'streamtape': { func: this._streamtapeExtractor, useQuality: true }, 'mixdrop': { func: this._mixdropExtractor, useQuality: true }, 'krakenfiles': { func: this._krakenfilesExtractor, useQuality: true }, 'veev': { func: this._upstreamExtractor, useQuality: false }, 'thetube': { func: this._thetubeExtractor, useQuality: false },
             };
+
             for (const qualityData of apiData.props.streams.data) {
                 const qualityLabel = qualityData.label.replace(' (source)', '').trim();
                 for (const mirror of qualityData.mirrors) {
                     const extractorData = driverToExtractor[mirror.driver];
-                    if (extractorData) {
-                        let mirrorLink = mirror.link.startsWith("//") ? "https:" + mirror.link : mirror.link;
-                        try {
-                            const driverName = mirror.driver.charAt(0).toUpperCase() + mirror.driver.slice(1);
-                            const qualityName = `${prefix} - ${driverName} - ${qualityLabel}`;
-                            const subExtractorPrefix = extractorData.useQuality ? qualityName : `${prefix} - ${driverName}`;
-                            const extractedVideos = await extractorData.func.call(this, mirrorLink, subExtractorPrefix);
-                            if (extractedVideos && extractedVideos.length > 0) allVideos.push(...extractedVideos);
-                        } catch (e) { /* Fails silently */ }
+                    if (!extractorData) continue; 
+
+                    const mirrorLink = mirror.link.startsWith("//") ? "https:" + mirror.link : mirror.link;
+                    const driverName = mirror.driver.charAt(0).toUpperCase() + mirror.driver.slice(1);
+                    let qualityName = `${prefix} - ${driverName} - ${qualityLabel}`;
+                    if (showEmbedUrl) {
+                        qualityName += ` [${mirrorLink}]`;
+                    }
+
+                    try {
+                        const subExtractorPrefix = extractorData.useQuality ? qualityName : `${prefix} - ${driverName}`;
+                        const extractedVideos = await extractorData.func.call(this, mirrorLink, subExtractorPrefix);
+                        if (extractedVideos && extractedVideos.length > 0) {
+                            allVideos.push(...extractedVideos);
+                        } else {
+                            throw new Error("Extractor returned no videos.");
+                        }
+                    } catch (e) {
+                        if (showEmbedUrl) {
+                            allVideos.push({ url: "", originalUrl: mirrorLink, quality: `[Failed] ${qualityName}`, headers: {} });
+                        }
                     }
                 }
             }
@@ -485,7 +499,7 @@ class DefaultExtension extends MProvider {
         const serverEntries = [
             "DoodStream", "Voe.sx", "Mp4upload", "Ok.ru", "Vidmoly", "Uqload", 
             "MegaMax", "VK", "Videa", "Dailymotion", "Sendvid", "StreamTape", 
-            "StreamWish/Filemoon & Variants", "VidBom/VidShare", "Lulustream", 
+            "StreamWish & Co.", "VidBom/VidShare", "Lulustream", 
             "MixDrop", "StreamRuby", "Upstream/Veev", "KrakenFiles", "TheTube", "Mega.nz (WebView only)"
         ];
         const serverEntryValues = [
