@@ -95,7 +95,7 @@ class DefaultExtension extends MProvider {
         const { list, hasNextPage } = await this.fetchAndParseCataloguePage(`/episode/page/${page}/`);
         const fixedList = list.map(item => ({
             ...item,
-            link: item.link.replace(/-%d8%a7%d9%84%d8%ح%d9%84%d9%82%d8%aة-.*$/, "").replace("/episode/", "/anime/")
+            link: item.link.replace(/-%d8%a7%d9%84%d8%ح%d9%84%d9%82%d8%a9-.*$/, "").replace("/episode/", "/anime/")
         }));
         return { list: fixedList, hasNextPage };
     }
@@ -157,7 +157,7 @@ class DefaultExtension extends MProvider {
             { key: 'uqload',     domains: ['uqload'],         func: this._uqloadExtractor,     useQuality: true },
             { key: 'megamax',    domains: ['megamax'],        func: this._megamaxExtractor,    useQuality: false },
             { key: 'vk',         domains: ['vk.com', 'vkvideo.ru'], func: this._vkExtractor,   useQuality: false },
-            { key: 'videa',      domains: ['videa.hu'],       func: this._videaExtractor,      useQuality: true },
+            { key: 'videa',      domains: ['videa.hu'],       func: this._videaExtractor,      useQuality: false },
             { key: 'dailymotion',domains: ['dailymotion'],    func: this._dailymotionExtractor,useQuality: false },
             { key: 'sendvid',    domains: ['sendvid'],        func: this._sendvidExtractor,    useQuality: true },
             { key: 'streamtape', domains: ['streamtape'],     func: this._streamtapeExtractor, useQuality: true },
@@ -165,7 +165,7 @@ class DefaultExtension extends MProvider {
             { key: 'vidbom',     domains: ['vidbom', 'vidbam', 'vbshar'], func: this._vidbomExtractor, useQuality: false },
             { key: 'filemoon',   domains: ['filemoon'],       func: this._filemoonExtractor,   useQuality: false },
             { key: 'lulustream', domains: ['luluvid', 'luluvdo'], func: this._lulustreamExtractor, useQuality: false },
-            { key: 'mixdrop',    domains: ['mixdrop', 'mxdrop'], func: this._mixdropExtractor,  useQuality: false },
+            { key: 'mixdrop',    domains: ['mixdrop', 'mxdrop'], func: this._mixdropExtractor,  useQuality: true },
             { key: 'streamruby', domains: ['streamruby', 'rubyvid'], func: this._streamrubyExtractor, useQuality: false },
             { key: 'upstream',   domains: ['upstream'],       func: this._upstreamExtractor,   useQuality: false },
         ];
@@ -195,18 +195,17 @@ class DefaultExtension extends MProvider {
                 }
 
                 if (extractor) {
-                    const extractedVideos = await extractor.func.call(this, streamUrl, qualityPrefix);
+                    const prefixForExtractor = extractor.useQuality ? qualityPrefix : serverNameText;
+                    const extractedVideos = await extractor.func.call(this, streamUrl, prefixForExtractor);
                     if (extractedVideos && extractedVideos.length > 0) {
                         videos.push(...extractedVideos);
                     } else {
-                        // Throw an error to be caught by the catch block, creating a "Failed" entry.
                         throw new Error("Extractor returned no videos.");
                     }
                 } else if (hosterSelection.includes("mega") && streamUrlLower.includes("mega.nz")) {
                     videos.push({ url: streamUrl, quality: qualityPrefix, headers: this._getVideoHeaders(streamUrl) });
                 }
             } catch (e) {
-                // If an extractor fails or returns nothing, add a non-playable "Failed" entry.
                 if (streamUrl && qualityPrefix) {
                     videos.push({
                         url: "",
@@ -259,38 +258,14 @@ class DefaultExtension extends MProvider {
         return sourceMatch ? [{ url: sourceMatch[1], originalUrl: sourceMatch[1], quality: this._formatQuality(quality, sourceMatch[1]), headers: { "Referer": url } }] : [];
     }
 
-    async _doodExtractor(url, prefix) {
-        const initialHeaders = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Upgrade-Insecure-Requests": "1",
-            "Referer": this.getBaseUrl()
-        };
-        const res = await this.client.get(url, initialHeaders);
-        const passMd5Match = res.body.match(/\/pass_md5\/([^"']*)["']/);
-        if (!passMd5Match) return [];
-
-        const passMd5 = passMd5Match[1];
+    async _doodExtractor(url, quality) {
+        const res = await this.client.get(url, this._getVideoHeaders(url));
+        const passMd5 = res.body.substringAfter("/pass_md5/").substringBefore("'");
         const doodApi = `https://${new URL(url).hostname}/pass_md5/${passMd5}`;
-        
-        const apiHeaders = { ...initialHeaders, "X-Requested-With": "XMLHttpRequest", "Referer": url };
-        const videoUrl = (await this.client.get(doodApi, apiHeaders)).body;
-        
+        const videoUrl = (await this.client.get(doodApi, this._getVideoHeaders(url))).body;
         const randomString = Math.random().toString(36).substring(7);
-        const token = passMd5.substring(passMd5.lastIndexOf('/') + 1);
-        const finalUrl = `${videoUrl}${randomString}?token=${token}`;
-        
-        return [{
-            url: finalUrl,
-            quality: this._formatQuality(prefix, finalUrl),
-            originalUrl: finalUrl,
-            headers: initialHeaders 
-        }];
+        const finalUrl = `${videoUrl}${randomString}?token=${passMd5.substring(passMd5.lastIndexOf('/') + 1)}`;
+        return [{ url: finalUrl, quality: this._formatQuality(quality, finalUrl), originalUrl: finalUrl, headers: this._getVideoHeaders(url) }];
     }
 
     async _voeExtractor(url) {
@@ -300,29 +275,56 @@ class DefaultExtension extends MProvider {
     }
 
     async _okruExtractor(url, prefix = "Okru") {
-        const res = await this.client.get(url, this.getHeaders(url));
+        const embedUrl = url.replace('/video/', '/videoembed/');
+        const res = await this.client.get(embedUrl, this.getHeaders(embedUrl));
         const dataOptions = res.body.substringAfter("data-options=\"").substringBefore("\"");
         if (!dataOptions) return [];
-        const videoHeaders = { ...this._getVideoHeaders("https://ok.ru/"), "Origin": "https://ok.ru" };
+        
+        const videoHeaders = this._getVideoHeaders("https://ok.ru/");
+        videoHeaders["Origin"] = "https://ok.ru";
+
         try {
-            const metadata = JSON.parse(JSON.parse(dataOptions.replace(/&quot;/g, '"')).flashvars.metadata);
+            const json = JSON.parse(dataOptions.replace(/&quot;/g, '"'));
+            const metadata = JSON.parse(json.flashvars.metadata);
+            
             const videos = [];
-            const getQualityName = (n) => ({ "full": "1080p", "hd": "720p", "sd": "480p", "low": "360p", "lowest": "240p", "mobile": "144p" }[n] || n);
+            const getQualityName = (name) => {
+                switch (name) {
+                    case "full": return "1080p";
+                    case "hd": return "720p";
+                    case "sd": return "480p";
+                    case "low": return "360p";
+                    case "lowest": return "240p";
+                    case "mobile": return "144p";
+                    default: return name;
+                }
+            };
+            
             if (metadata.videos) {
-                videos.push(...metadata.videos.map(v => ({
-                    url: v.url, originalUrl: v.url, headers: videoHeaders,
-                    quality: this._formatQuality(`${prefix} ${getQualityName(v.name)}`, v.url),
-                })));
+                videos.push(...metadata.videos.map(video => {
+                    const quality = getQualityName(video.name);
+                    return {
+                        url: video.url,
+                        originalUrl: video.url,
+                        quality: this._formatQuality(`${prefix} ${quality}`, video.url),
+                        headers: videoHeaders
+                    };
+                }));
             }
+
             if (metadata.hlsManifestUrl) {
                 videos.unshift({
-                    url: metadata.hlsManifestUrl, originalUrl: metadata.hlsManifestUrl, headers: videoHeaders,
+                    url: metadata.hlsManifestUrl,
+                    originalUrl: metadata.hlsManifestUrl,
                     quality: this._formatQuality(`${prefix} Auto (HLS)`, metadata.hlsManifestUrl),
+                    headers: videoHeaders
                 });
             }
+
             if (videos.length > 1) {
-                const auto = videos.shift();
-                videos.reverse().unshift(auto);
+                const autoOption = videos.shift();
+                videos.reverse();
+                videos.unshift(autoOption);
             }
             return videos;
         } catch (e) { return []; }
@@ -334,10 +336,10 @@ class DefaultExtension extends MProvider {
         return (hlsUrl && hlsUrl.includes(".m3u8")) ? this._parseM3U8(hlsUrl, prefix, this._getVideoHeaders(url)) : [];
     }
     
-    async _uqloadExtractor(url, prefix) {
+    async _uqloadExtractor(url, quality) {
         const res = await this.client.get(url, this.getHeaders(url));
         const videoUrl = res.body.substringAfter('sources: ["').substringBefore('"]');
-        return videoUrl.startsWith("http") ? [{ url: videoUrl, quality: this._formatQuality(prefix, videoUrl), originalUrl: videoUrl, headers: this._getVideoHeaders("https://uqload.to/") }] : [];
+        return videoUrl.startsWith("http") ? [{ url: videoUrl, quality: this._formatQuality(quality, videoUrl), originalUrl: videoUrl, headers: this._getVideoHeaders("https://uqload.to/") }] : [];
     }
 
     async _megamaxExtractor(url, prefix) {
@@ -387,19 +389,81 @@ class DefaultExtension extends MProvider {
         return videos;
     }
 
-    async _videaExtractor(url, quality) {
+    async _videaExtractor(url, prefix) {
         const res = await this.client.get(url, this.getHeaders(url));
-        const videoUrl = res.body.substringAfter("v.player.source(").substringBefore(");").match(/'(https?:\/\/[^']+)'/)?.[1];
-        return videoUrl ? [{ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(quality, videoUrl), headers: this._getVideoHeaders(url) }] : [];
+        const body = res.body;
+
+        const vcodeMatch = body.match(/var vcode = "([^"]+)"/);
+        if (!vcodeMatch || !vcodeMatch[1]) {
+            return [];
+        }
+        const vcode = vcodeMatch[1];
+
+        const apiUrl = "https://videa.hu/player/xml";
+        const apiHeaders = {
+            "Referer": url,
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest"
+        };
+
+        const apiRes = await this.client.post(apiUrl, `v=${vcode}`, apiHeaders);
+        const xmlBody = apiRes.body;
+
+        const sourcesMatches = [...xmlBody.matchAll(/<video_source[^>]+>\s*<!\[CDATA\[([^\]]+)\]\]>/g)];
+        if (!sourcesMatches.length) {
+            return [];
+        }
+
+        const videos = [];
+        for (const match of sourcesMatches) {
+            let videoUrl = match[1];
+            if (videoUrl.startsWith("//")) {
+                videoUrl = "https:" + videoUrl;
+            }
+
+            const resolutionMatch = match[0].match(/resolution="(\d+)"/);
+            const quality = resolutionMatch ? `${resolutionMatch[1]}p` : "SD";
+
+            videos.push({
+                url: videoUrl,
+                originalUrl: videoUrl,
+                quality: this._formatQuality(`${prefix} ${quality}`, videoUrl),
+                headers: this._getVideoHeaders(url)
+            });
+        }
+
+        videos.sort((a, b) => {
+            const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0);
+            const qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
+            return qualityB - qualityA;
+        });
+
+        return videos;
     }
 
     async _dailymotionExtractor(url, prefix) {
-        const res = await this.client.get(url, this._getVideoHeaders(url));
-        const jsonConfig = res.body.substringAfter('"config":').substringBefore('});</script>');
-        if (!jsonConfig) return [];
-        const metadata = JSON.parse(jsonConfig).metadata;
-        const masterUrl = metadata?.qualities?.auto?.[0]?.url;
-        return (masterUrl && masterUrl.includes(".m3u8")) ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : [];
+        try {
+            const pageRes = await this.client.get(url, this._getVideoHeaders(url));
+            const videoIdMatch = pageRes.body.match(/<link rel="canonical" href="[^"]+\/video\/([^"]+)"/);
+            const videoId = videoIdMatch?.[1];
+
+            if (!videoId) {
+                return [];
+            }
+            const metadataUrl = `https://www.dailymotion.com/player/metadata/video/${videoId}`;
+            const metadataHeaders = this._getVideoHeaders(url);
+            const metadataRes = await this.client.get(metadataUrl, metadataHeaders);
+            const metadata = JSON.parse(metadataRes.body);
+            const masterUrl = metadata?.qualities?.auto?.[0]?.url;
+
+            if (masterUrl && masterUrl.includes(".m3u8")) {
+                return this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url));
+            } else {
+                return [];
+            }
+        } catch (error) {
+            return [];
+        }
     }
 
     async _sendvidExtractor(url, quality) {
@@ -465,14 +529,14 @@ class DefaultExtension extends MProvider {
         return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : [];
     }
 
-    async _mixdropExtractor(url, prefix = "MixDrop") {
+    async _mixdropExtractor(url, quality) {
         const res = await this.client.get(url, this.getHeaders(url));
         let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
         if (!script) return [];
         script = "eval(function(p,a,c,k,e,d)" + script;
         const unpacked = unpackJs(script);
         const videoUrl = "https:" + unpacked.match(/MDCore\.wurl="([^"]+)"/)?.[1];
-        return videoUrl ? [{ url: videoUrl, quality: this._formatQuality(prefix, videoUrl), originalUrl: videoUrl, headers: this._getVideoHeaders(url) }] : [];
+        return videoUrl ? [{ url: videoUrl, quality: this._formatQuality(quality, videoUrl), originalUrl: videoUrl, headers: this._getVideoHeaders(url) }] : [];
     }
 
     async _streamrubyExtractor(url, prefix = "StreamRuby") {
@@ -505,7 +569,7 @@ class DefaultExtension extends MProvider {
 
     getFilterList() {
         // ... (Filter code remains unchanged)
-        const getSlug = (href) => href.split('/').filter(Boolean).pop();const sections=[{name:'الكل',value:''},{name:'الانمي المترجم',value:getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%aa%d8%b1%d8%ac%d9%85/')},{name:'الانمي المدبلج',value:getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%af%d8%a8%d9%84%d8%ac/')}].map(s=>({type_name:"SelectOption",name:s.name,value:s.value}));const genres=[{name:'الكل',value:''},{name:'أطفال',value:'أطفال'},{name:'أكشن',value:'أكشن'},{name:'إيتشي',value:'إيتشي'},{name:'اثارة',value:'اثارة'},{name:'الحياة العملية',value:'الحياة-العملية'},{name:'العاب',value:'العاب'},{name:'بوليسي',value:'بوليسي'},{name:'تاريخي',value:'تاريخي'},{name:'جنون',value:'جنون'},{name:'جوسي',value:'جوسي'},{name:'حربي',value:'حربي'},{name:'حريم',value:'حريم'},{name:'خارق للعادة',value:'خارق-للعادة'},{name:'خيال علمي',value:'خيال-علمي'},{name:'دراما',value:'دراما'},{name:'رعب',value:'رعب'},{name:'رومانسي',value:'رومانسي'},{name:'رياضي',value:'رياضي'},{name:'ساموراي',value:'ساموراي'},{name:'سباق',value:'سباق'},{name:'سحر',value:'سحر'},{name:'سينين',value:'سينين'},{name:'شريحة من الحياة',value:'شريحة-من-الحياة'},{name:'شوجو',value:'شوجو'},{name:'شوجو اَي',value:'شوجو-اَي'},{name:'شونين',value:'شونين'},{name:'شونين اي',value:'شونين-اي'},{name:'شياطين',value:'شياطين'},{name:'طبي',value:'طبي'},{name:'غموض',value:'غموض'},{name:'فضائي',value:'فضائي'},{name:'فنتازيا',value:'فنتازيا'},{name:'فنون تعبيرية',value:'فنون-تعبيرية'},{name:'فنون قتالية',value:'فنون-قتالية'},{name:'قوى خارقة',value:'قوى- خارقة'},{name:'كوميدي',value:'كوميدي'},{name:'مأكولات',value:'مأكولات'},{name:'محاكاة ساخرة',value:'محاكاة-ساخرة'},{name:'مدرسي',value:'مدرسي'},{name:'مصاصي دماء',value:'مصاصي-دماء'},{name:'مغامرات',value:'مغامرات'},{name:'موسيقي',value:'موسيقي'},{name:'ميكا',value:'ميكا'},{name:'نفسي',value:'نفسي'},].map(g=>({type_name:"SelectOption",name:g.name,value:encodeURIComponent(g.value)}));const statuses=[{name:'الكل',value:''},{name:'لم يعرض بعد',value:getSlug('https://ww.anime4up.rest/anime-status/%d9%84%d9%85-%d9%8a%d8%b9%d8%b1%d8%b6-%d8%a8%d8%b9%d8%af/')},{name:'مكتمل',value:'complete'},{name:'يعرض الان',value:getSlug('https://ww.anime4up.rest/anime-status/%d9%8a%d8%b9%d8%b1%d8%b6-%d8%a7%d9%84%d8%a7%d9%86-1/')}].map(s=>({type_name:"SelectOption",name:s.name,value:s.value}));const types=[{name:'الكل',value:''},{name:'Movie',value:'movie-3'},{name:'ONA',value:'ona1'},{name:'OVA',value:'ova1'},{name:'Special',value:'special1'},{name:'TV',value:'tv2'}].map(t=>({type_name:"SelectOption",name:t.name,value:t.value}));const seasons=[{name:'الكل',value:'',sortKey:'9999'}];const currentYear=new Date().getFullYear();const seasonMap={'spring':'ربيع','summer':'صيف','fall':'خريف','winter':'شتاء'};for(let year=currentYear+2;year>=2000;year--){Object.entries(seasonMap).forEach(([eng,arb],index)=>{const seasonSlug=`${arb}-${year}`;seasons.push({name:`${arb} ${year}`,value:encodeURIComponent(seasonSlug),sortKey:`${year}-${4-index}`});});}
+        const getSlug = (href) => href.split('/').filter(Boolean).pop();const sections=[{name:'الكل',value:''},{name:'الانمي المترجم',value:getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%aa%d8%b1%d8%ac%d9%85/')},{name:'الانمي المدبلج',value:getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%AF%d8%a8%d9%84%d8%ac/')}].map(s=>({type_name:"SelectOption",name:s.name,value:s.value}));const genres=[{name:'الكل',value:''},{name:'أطفال',value:'أطفال'},{name:'أكشن',value:'أكشن'},{name:'إيتشي',value:'إيتشي'},{name:'اثارة',value:'اثارة'},{name:'الحياة العملية',value:'الحياة-العملية'},{name:'العاب',value:'العاب'},{name:'بوليسي',value:'بوليسي'},{name:'تاريخي',value:'تاريخي'},{name:'جنون',value:'جنون'},{name:'جوسي',value:'جوسي'},{name:'حربي',value:'حربي'},{name:'حريم',value:'حريم'},{name:'خارق للعادة',value:'خارق-للعادة'},{name:'خيال علمي',value:'خيال-علمي'},{name:'دراما',value:'دراما'},{name:'رعب',value:'رعب'},{name:'رومانسي',value:'رومانسي'},{name:'رياضي',value:'رياضي'},{name:'ساموراي',value:'ساموراي'},{name:'سباق',value:'سباق'},{name:'سحر',value:'سحر'},{name:'سينين',value:'سينين'},{name:'شريحة من الحياة',value:'شريحة-من-الحياة'},{name:'شوجو',value:'شوجو'},{name:'شوجو اَي',value:'شوجو-اَي'},{name:'شونين',value:'شونين'},{name:'شونين اي',value:'شونين-اي'},{name:'شياطين',value:'شياطين'},{name:'طبي',value:'طبي'},{name:'غموض',value:'غموض'},{name:'فضائي',value:'فضائي'},{name:'فنتازيا',value:'فنتازيا'},{name:'فنون تعبيرية',value:'فنون-تعبيرية'},{name:'فنون قتالية',value:'فنون-قتالية'},{name:'قوى خارقة',value:'قوى- خارقة'},{name:'كوميدي',value:'كوميدي'},{name:'مأكولات',value:'مأكولات'},{name:'محاكاة ساخرة',value:'محاكاة-ساخرة'},{name:'مدرسي',value:'مدرسي'},{name:'مصاصي دماء',value:'مصاصي-دماء'},{name:'مغامرات',value:'مغامرات'},{name:'موسيقي',value:'موسيقي'},{name:'ميكا',value:'ميكا'},{name:'نفسي',value:'نفسي'},].map(g=>({type_name:"SelectOption",name:g.name,value:encodeURIComponent(g.value)}));const statuses=[{name:'الكل',value:''},{name:'لم يعرض بعد',value:getSlug('https://ww.anime4up.rest/anime-status/%d9%84%d9%85-%d9%8a%d8%b9%d8%b1%d8%b6-%d8%a8%d8%b9%d8%af/')},{name:'مكتمل',value:'complete'},{name:'يعرض الان',value:getSlug('https://ww.anime4up.rest/anime-status/%d9%8a%d8%b9%d8%b1%d8%b6-%d8%a7%d9%84%d8%a7%d9%86-1/')}].map(s=>({type_name:"SelectOption",name:s.name,value:s.value}));const types=[{name:'الكل',value:''},{name:'Movie',value:'movie-3'},{name:'ONA',value:'ona1'},{name:'OVA',value:'ova1'},{name:'Special',value:'special1'},{name:'TV',value:'tv2'}].map(t=>({type_name:"SelectOption",name:t.name,value:t.value}));const seasons=[{name:'الكل',value:'',sortKey:'9999'}];const currentYear=new Date().getFullYear();const seasonMap={'spring':'ربيع','summer':'صيف','fall':'خريف','winter':'شتاء'};for(let year=currentYear+2;year>=2000;year--){Object.entries(seasonMap).forEach(([eng,arb],index)=>{const seasonSlug=`${arb}-${year}`;seasons.push({name:`${arb} ${year}`,value:encodeURIComponent(seasonSlug),sortKey:`${year}-${4-index}`});});}
         const seasonOptions=seasons.sort((a,b)=>b.sortKey.localeCompare(a.sortKey)).map(s=>({type_name:"SelectOption",name:s.name,value:s.value}));return[{type_name:"HeaderFilter",name:"ملاحظة: سيتم تجاهل الفلاتر في حال البحث بالاسم."},{type_name:"SelectFilter",name:"القسم",state:0,values:sections},{type_name:"SelectFilter",name:"تصنيف الأنمي",state:0,values:genres},{type_name:"SelectFilter",name:"حالة الأنمي",state:0,values:statuses},{type_name:"SelectFilter",name:"النوع",state:0,values:types},{type_name:"SelectFilter",name:"الموسم",state:0,values:seasonOptions},];
     }
 
