@@ -12,6 +12,7 @@ const mangayomiSources = [{
 }];
 
 
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -149,10 +150,10 @@ class DefaultExtension extends MProvider {
 
         const extractorMap = [
             { key: 'mp4upload',  domains: ['mp4upload'],      func: this._mp4uploadExtractor,  useQuality: true },
-            { key: 'dood',       domains: ['dood', 'd-s.io', 'vide0.net'], func: this._doodstreamExtractor,       useQuality: true },
+            { key: 'dood',       domains: ['dood', 'd-s.io', 'vide0.net'], func: this._doodstreamExtractor, useQuality: true },
             { key: 'okru',       domains: ['ok.ru'],          func: this._okruExtractor,       useQuality: false },
             { key: 'voe',        domains: ['voe.sx'],         func: this._voeExtractor,        useQuality: false },
-            { key: 'vidmoly',    domains: ['vidmoly'],        func: this._vidmolyExtractor,     useQuality: false },
+            { key: 'vidmoly',    domains: ['vidmoly'],        func: this._vidmolyExtractor,    useQuality: false },
             { key: 'uqload',     domains: ['uqload'],         func: this._uqloadExtractor,     useQuality: true },
             { key: 'megamax',    domains: ['megamax'],        func: this._megamaxExtractor,    useQuality: false },
             { key: 'vk',         domains: ['vk.com', 'vkvideo.ru'], func: this._vkExtractor,   useQuality: false },
@@ -160,7 +161,12 @@ class DefaultExtension extends MProvider {
             { key: 'dailymotion',domains: ['dailymotion'],    func: this._dailymotionExtractor,useQuality: false },
             { key: 'sendvid',    domains: ['sendvid'],        func: this._sendvidExtractor,    useQuality: true },
             { key: 'streamtape', domains: ['streamtape'],     func: this._streamtapeExtractor, useQuality: true },
-            { key: 'streamwish', domains: ['streamwish', 'filelions', 'streamvid', 'wolfstream', 'embedsito', 'mivalyo', 'vidguard', 'bigwarp', 'filemoon', 'darkibox', 'hexload'], func: this._streamwishExtractor, useQuality: false },
+            { key: 'streamwish', domains: ['streamwish', 'anime4low.sbs'], func: this._streamwishExtractor, useQuality: false },
+            { key: 'filemoon',   domains: ['filemoon'],       func: this._streamwishExtractor, useQuality: false },
+            { key: 'vidguard',   domains: ['vidguard', 'mivalyo'], func: this._streamwishExtractor, useQuality: false },
+            { key: 'darkibox',   domains: ['darkibox'],       func: this._streamwishExtractor, useQuality: false },
+            { key: 'hexload',    domains: ['hexload'],        func: this._streamwishExtractor, useQuality: false },
+            { key: 'bigwarp',    domains: ['bigwarp'],        func: this._streamwishExtractor, useQuality: false },
             { key: 'vidbom',     domains: ['vidbom', 'vidbam', 'vbshar', 'vdbtm'], func: this._vidbomExtractor, useQuality: false },
             { key: 'lulustream', domains: ['luluvid', 'luluvdo'], func: this._lulustreamExtractor, useQuality: false },
             { key: 'mixdrop',    domains: ['mixdrop', 'mxdrop'], func: this._mixdropExtractor,  useQuality: true },
@@ -287,50 +293,28 @@ class DefaultExtension extends MProvider {
     }
 
     async _voeExtractor(url, prefix = "Voe.sx") {
-        // Prioritize the new download link method
         try {
             const videoId = url.split('/').pop();
             if (!videoId) throw new Error("Could not find video ID");
-
             const downloadUrl = `https://kellywhatcould.com/${videoId}/download`;
             const res = await this.client.get(downloadUrl, this._getVideoHeaders(url));
             const doc = new Document(res.body);
-            
             const videos = [];
-            // Select all 'a' tags that contain a 'small' tag with the text "Direct Download Link"
             for (const linkElement of doc.select("a:has(small:contains(Direct Download Link))")) {
                 let videoUrl = linkElement.attr("href");
                 if (!videoUrl) continue;
-
                 videoUrl = videoUrl.replace(/&amp;/g, '&');
-                const qualityText = linkElement.text;
-                const quality = qualityText.match(/(\d+p)/)?.[1] || "";
-                const qualityLabel = `${prefix} - ${quality}`;
-
-                videos.push({
-                    url: videoUrl,
-                    originalUrl: videoUrl,
-                    quality: this._formatQuality(qualityLabel, videoUrl),
-                    headers: this._getVideoHeaders(url),
-                });
+                const quality = linkElement.text.match(/(\d+p)/)?.[1] || "";
+                videos.push({ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(`${prefix} - ${quality}`, videoUrl), headers: this._getVideoHeaders(url) });
             }
-
             if (videos.length > 0) {
-                videos.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
-                return videos;
+                return videos.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
             }
-        } catch (e) {
-            // Fallback to HLS if download link method fails
-        }
-
-        // Fallback to the old HLS method
+        } catch (e) { /* Fallback to HLS if download link method fails */ }
         const res = await this.client.get(url, this._getVideoHeaders(url));
         const hlsUrl = res.body.substringAfter("'hls': '").substringBefore("'");
-        if (hlsUrl) {
-            return this._parseM3U8(hlsUrl, prefix);
-        }
-        
-        return []; // Return empty if both methods fail
+        if (hlsUrl) { return this._parseM3U8(hlsUrl, prefix); }
+        return [];
     }
 
     async _okruExtractor(url, prefix = "Okru") {
@@ -420,12 +404,40 @@ class DefaultExtension extends MProvider {
     }
     
     async _vkExtractor(url, prefix) {
-        const videoHeaders = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0", "Referer": url };
+        const videoHeaders = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Referer": url,
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "iframe",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "cross-site",
+        };
         const res = await this.client.get(url, videoHeaders);
+        
         const serverName = prefix.split(' - ')[0].trim();
+        
         const matches = [...res.body.matchAll(/"url(\d+)":"(.*?)"/g)];
-        const videos = matches.map(match => ({ url: match[2].replace(/\\/g, ''), originalUrl: match[2].replace(/\\/g, ''), quality: this._formatQuality(`${serverName} ${match[1]}p`, match[2].replace(/\\/g, '')), headers: videoHeaders }));
-        return videos.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
+        
+        const videos = matches.map(match => {
+            const qualityLabel = `${serverName} ${match[1]}p`;
+            const videoUrl = match[2].replace(/\\/g, '');
+            return {
+                url: videoUrl,
+                originalUrl: videoUrl,
+                quality: this._formatQuality(qualityLabel, videoUrl),
+                headers: videoHeaders
+            };
+        });
+
+        videos.sort((a, b) => {
+            const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0);
+            const qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
+            return qualityB - qualityA;
+        });
+        
+        return videos;
     }
 
     async _videaExtractor(url, quality) {
@@ -457,14 +469,19 @@ class DefaultExtension extends MProvider {
         return [{ url: finalUrl, quality: this._formatQuality(quality, finalUrl), originalUrl: finalUrl, headers: this._getVideoHeaders(url) }];
     }
     
-    async _streamwishExtractor(url, prefix = "StreamWish") {
-        const res = await this.client.get(url, this.getHeaders(url));
-        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
-        if (!script) return [];
-        script = "eval(function(p,a,c,k,e,d)" + script;
-        const unpacked = unpackJs(script);
-        const masterUrl = unpacked.match(/file:\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/)?.[1];
-        return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : [];
+    async _streamwishExtractor(url, prefix) {
+        const res = await this.client.get(url, this._getVideoHeaders(url));
+        const doc = new Document(res.body);
+        const scriptElement = doc.selectFirst("script:contains(m3u8)");
+        if (!scriptElement) return [];
+        let scriptContent = scriptElement.text;
+        if (scriptContent.includes("eval(function(p,a,c,k,e,d)")) {
+            scriptContent = unpackJs(scriptContent);
+        }
+        const masterUrl = scriptContent.match(/file:\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/)?.[1];
+        if (!masterUrl) return [];
+        const videoHeaders = { "Referer": `${new URL(url).origin}/`, "Origin": new URL(url).origin, "User-Agent": this.getHeaders(url)["User-Agent"] };
+        return this._parseM3U8(masterUrl, prefix, videoHeaders);
     }
     
     async _vidbomExtractor(url, prefix = "VidBom") {
@@ -496,9 +513,8 @@ class DefaultExtension extends MProvider {
 
     async _mixdropExtractor(url, quality) {
         const res = await this.client.get(url, this.getHeaders(url));
-        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        const script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
         if (!script) return [];
-        script = "eval(function(p,a,c,k,e,d)" + script;
         const unpacked = unpackJs(script);
         const videoUrlPart = unpacked.match(/MDCore\.wurl=['"]([^'"]+)['"]/)?.[1];
         if (!videoUrlPart) return [];
@@ -519,9 +535,8 @@ class DefaultExtension extends MProvider {
 
     async _upstreamExtractor(url, prefix = "Upstream") {
         const res = await this.client.get(url, this.getHeaders(url));
-        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        const script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
         if (!script) return [];
-        script = "eval(function(p,a,c,k,e,d)" + script;
         const unpacked = unpackJs(script);
         const masterUrl = unpacked.match(/hls:\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/)?.[1];
         return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : [];
@@ -538,9 +553,8 @@ class DefaultExtension extends MProvider {
 
     async _thetubeExtractor(url, prefix = "TheTube") {
         const res = await this.client.get(url, this.getHeaders(url));
-        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        const script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
         if (!script) return [];
-        script = "eval(function(p,a,c,k,e,d)" + script;
         const unpacked = unpackJs(script);
         const masterUrl = unpacked.match(/src:\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/)?.[1];
         return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : [];
@@ -558,13 +572,15 @@ class DefaultExtension extends MProvider {
         const serverEntries = [
             "DoodStream", "Voe.sx", "Mp4upload", "Ok.ru", "Vidmoly", "Uqload", 
             "MegaMax", "VK", "Videa", "Dailymotion", "Sendvid", "StreamTape", 
-            "StreamWish & Co.", "VidBom/VidShare", "Lulustream", 
+            "StreamWish", "Filemoon", "VidGuard/Mivalyo", "Darkibox", "Hexload", "BigWarp",
+            "VidBom/VidShare", "Lulustream", 
             "MixDrop", "StreamRuby", "Upstream/Veev", "KrakenFiles", "TheTube", "Mega.nz (WebView only)"
         ];
         const serverEntryValues = [
             "dood", "voe", "mp4upload", "okru", "vidmoly", "uqload", 
             "megamax", "vk", "videa", "dailymotion", "sendvid", "streamtape",
-            "streamwish", "vidbom", "lulustream", 
+            "streamwish", "filemoon", "vidguard", "darkibox", "hexload", "bigwarp",
+            "vidbom", "lulustream", 
             "mixdrop", "streamruby", "upstream", "krakenfiles", "thetube", "mega"
         ];
         return [{
@@ -619,5 +635,57 @@ class DefaultExtension extends MProvider {
     }
 }
 
-// unpacker function for some extractors
-function unpackJs(p, a, c, k, e, d) { while (c--) { if (k[c]) { p = p.replace(new RegExp('\\b' + c.toString(a) + '\\b', 'g'), k[c]) } } return p }
+// Robust unpacker function based on the provided Kotlin example
+function unpackJs(packedJS) {
+    try {
+        const match = packedJS.match(/}\s*\('(.*)',\s*(\d+),\s*(\d+),\s*'(.*?)'\.split\('\|'\)/);
+        if (!match) {
+             const oldMatch = packedJS.match(/eval\(function\(p,a,c,k,e,d\){.*}\((.*)\)\)/);
+             if (oldMatch) {
+                let args = oldMatch[1].split(',').map(arg => arg.trim());
+                let p = args[0].replace(/^'|'$/g, '');
+                let a = parseInt(args[1]);
+                let c = parseInt(args[2]);
+                let k = args[3].replace(/^'|'$/g, '').split('|');
+                
+                while (c--) {
+                    if (k[c]) {
+                        p = p.replace(new RegExp('\\b' + c.toString(a) + '\\b', 'g'), k[c]);
+                    }
+                }
+                return p;
+             }
+             return packedJS;
+        }
+
+        let payload = match[1].replace(/\\'/g, "'");
+        const radix = parseInt(match[2]);
+        let count = parseInt(match[3]);
+        const symtab = match[4].split('|');
+
+        if (symtab.length !== count) return packedJS; // Sanity check
+
+        const unbase = (str) => {
+            const ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            if (radix > 36) {
+                let ret = 0;
+                const strRev = str.split('').reverse().join('');
+                for (let i = 0; i < strRev.length; i++) {
+                    const charIndex = ALPHABET.indexOf(strRev[i]);
+                    if (charIndex === -1) return NaN;
+                    ret += charIndex * Math.pow(radix, i);
+                }
+                return ret;
+            } else {
+                return parseInt(str, radix);
+            }
+        };
+
+        return payload.replace(/\b\w+\b/g, (word) => {
+            const index = unbase(word);
+            return (index < count && symtab[index] && symtab[index] !== "") ? symtab[index] : word;
+        });
+    } catch (e) {
+        return packedJS; // Return original on error
+    }
+}
