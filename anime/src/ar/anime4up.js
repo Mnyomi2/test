@@ -179,6 +179,7 @@ class DefaultExtension extends MProvider {
         for (const element of doc.select('#episode-servers li a')) {
             let streamUrl = null;
             let qualityPrefix = null;
+            let serverNameText = null;
             try {
                 streamUrl = element.attr('data-ep-url');
                 if (!streamUrl) continue;
@@ -186,39 +187,46 @@ class DefaultExtension extends MProvider {
                 if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
                 if (streamUrl.includes("vidmoly.to")) streamUrl = streamUrl.replace("vidmoly.to", "vidmoly.net");
 
-                const streamUrlLower = streamUrl.toLowerCase();
                 const qualityText = element.text.trim();
-                
                 const extractor = extractorMap.find(ext =>
-                    hosterSelection.includes(ext.key) && ext.domains.some(d => streamUrlLower.includes(d))
+                    hosterSelection.includes(ext.key) && ext.domains.some(d => streamUrl.toLowerCase().includes(d))
                 );
 
                 const numericQuality = this.getNumericQuality(qualityText);
-                const serverNameText = qualityText.split(' - ')[0].trim();
+                serverNameText = qualityText.split(' - ')[0].trim();
                 qualityPrefix = `${serverNameText} - ${numericQuality}`;
                 if (showEmbedUrl) {
                     qualityPrefix += ` [${streamUrl}]`;
                 }
 
+                let foundVideos = false;
                 if (extractor) {
                     const prefixForExtractor = extractor.useQuality ? qualityPrefix : serverNameText;
                     const extractedVideos = await extractor.func.call(this, streamUrl, prefixForExtractor);
                     if (extractedVideos && extractedVideos.length > 0) {
                         videos.push(...extractedVideos);
-                    } else {
-                        throw new Error("Extractor returned no videos.");
+                        foundVideos = true;
                     }
-                } else if (hosterSelection.includes("mega") && streamUrlLower.includes("mega.nz")) {
+                } else if (hosterSelection.includes("mega") && streamUrl.toLowerCase().includes("mega.nz")) {
                     videos.push({ url: streamUrl, quality: qualityPrefix, headers: this._getVideoHeaders(streamUrl) });
+                    foundVideos = true;
                 }
+
+                if (!foundVideos) {
+                    throw new Error("No specific extractor found or extractor failed.");
+                }
+
             } catch (e) {
-                if (showEmbedUrl && streamUrl && qualityPrefix) {
-                    videos.push({
-                        url: "",
-                        originalUrl: streamUrl,
-                        quality: `[Failed] ${qualityPrefix}`,
-                        headers: {}
-                    });
+                const useFallback = this.getPreference("use_fallback_extractor");
+                if (useFallback && streamUrl && serverNameText) {
+                    const fallbackVideos = await this._allinoneExtractor(streamUrl, `[Fallback] ${serverNameText}`);
+                    if (fallbackVideos && fallbackVideos.length > 0) {
+                        videos.push(...fallbackVideos);
+                    } else if (showEmbedUrl && qualityPrefix) {
+                        videos.push({ url: "", originalUrl: streamUrl, quality: `[Failed] ${qualityPrefix}`, headers: {} });
+                    }
+                } else if (showEmbedUrl && streamUrl && qualityPrefix) {
+                    videos.push({ url: "", originalUrl: streamUrl, quality: `[Failed] ${qualityPrefix}`, headers: {} });
                 }
             }
         }
@@ -560,6 +568,41 @@ class DefaultExtension extends MProvider {
         return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : [];
     }
 
+    async _allinoneExtractor(url, prefix) {
+        try {
+            const res = await this.client.get(url, this._getVideoHeaders(url));
+            let body = res.body;
+
+            if (body.includes("eval(function(p,a,c,k,e,d)")) {
+                const script = body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+                if (script) body = unpackJs(script);
+            }
+
+            const m3u8Match = body.match(/['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/);
+            if (m3u8Match && m3u8Match[1]) {
+                return await this._parseM3U8(m3u8Match[1], prefix, this._getVideoHeaders(url));
+            }
+
+            const videoFileMatch = body.match(/['"](https?:\/\/[^'"]+\.(?:mp4|webm|mkv|mov)[^'"]*)['"]/);
+            if (videoFileMatch && videoFileMatch[1]) {
+                const videoUrl = videoFileMatch[1];
+                return [{ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(prefix, videoUrl), headers: this._getVideoHeaders(url) }];
+            }
+
+            const doc = new Document(res.body);
+            const sourceSrc = doc.selectFirst("source[src]")?.getSrc || doc.selectFirst("video[src]")?.getSrc;
+            if (sourceSrc) {
+                if (sourceSrc.includes('.m3u8')) {
+                    return await this._parseM3U8(sourceSrc, prefix, this._getVideoHeaders(url));
+                }
+                return [{ url: sourceSrc, originalUrl: sourceSrc, quality: this._formatQuality(prefix, sourceSrc), headers: this._getVideoHeaders(url) }];
+            }
+            return [];
+        } catch (e) {
+            return [];
+        }
+    }
+
     // --- FILTERS AND PREFERENCES ---
 
     getFilterList() {
@@ -629,6 +672,13 @@ class DefaultExtension extends MProvider {
             switchPreferenceCompat: {
                 title: "إظهار رابط التضمين (للتصحيح)",
                 summary: "عرض رابط التضمين الأولي بجانب اسم الجودة (لأغراض التصحيح).",
+                value: false,
+            }
+        }, {
+            key: "use_fallback_extractor",
+            switchPreferenceCompat: {
+                title: "استخدام مستخرج احتياطي (تجريبي)",
+                summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام.",
                 value: false,
             }
         }];
