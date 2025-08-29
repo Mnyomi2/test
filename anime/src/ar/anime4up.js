@@ -41,8 +41,14 @@ class DefaultExtension extends MProvider {
     _getVideoHeaders(refererUrl) {
         const headers = this.getHeaders(refererUrl);
         headers["Referer"] = refererUrl;
-        if (refererUrl.includes("vidmoly")) {
-             headers["Origin"] = "https://vidmoly.net";
+        try {
+            // Dynamically set the Origin header based on the referer URL's origin.
+            // This is crucial for many video hosters that check this header.
+            const url = new URL(refererUrl);
+            headers["Origin"] = url.origin;
+        } catch (e) {
+            // Fallback to the base Origin if the refererUrl is somehow invalid.
+            headers["Origin"] = this.getBaseUrl();
         }
         return headers;
     }
@@ -166,7 +172,7 @@ class DefaultExtension extends MProvider {
             { key: 'vidguard',   domains: ['vidguard', 'mivalyo'], func: this._streamwishExtractor, useQuality: false },
             { key: 'darkibox',   domains: ['darkibox'],       func: this._streamwishExtractor, useQuality: false },
             { key: 'hexload',    domains: ['hexload'],        func: this._streamwishExtractor, useQuality: false },
-            { key: 'bigwarp',    domains: ['bigwarp'],        func: this._streamwishExtractor, useQuality: false },
+            { key: 'bigwarp',    domains: ['bigwarp'],        func: this._bigwarpExtractor, useQuality: false },
             { key: 'vidbom',     domains: ['vidbom', 'vidbam', 'vbshar', 'vdbtm'], func: this._vidbomExtractor, useQuality: false },
             { key: 'lulustream', domains: ['luluvid', 'luluvdo'], func: this._lulustreamExtractor, useQuality: false },
             { key: 'mixdrop',    domains: ['mixdrop', 'mxdrop'], func: this._mixdropExtractor,  useQuality: true },
@@ -376,7 +382,7 @@ class DefaultExtension extends MProvider {
             if (apiData?.props?.streams?.status !== "success") return [];
             
             const driverToExtractor = {
-                'mp4upload': { func: this._mp4uploadExtractor, useQuality: true }, 'doodstream': { func: this._doodstreamExtractor, useQuality: true }, 'voe': { func: this._voeExtractor, useQuality: false }, 'streamwish': { func: this._streamwishExtractor, useQuality: false }, 'filemoon': { func: this._streamwishExtractor, useQuality: false }, 'bigwarp': { func: this._streamwishExtractor, useQuality: false }, 'vidguard': { func: this._streamwishExtractor, useQuality: false }, 'vidhide': { func: this._streamwishExtractor, useQuality: false }, 'darkibox': { func: this._streamwishExtractor, useQuality: false }, 'hexupload': { func: this._streamwishExtractor, useQuality: false }, 'lulustream': { func: this._lulustreamExtractor, useQuality: false }, 'vadbam': { func: this._vidbomExtractor, useQuality: false }, 'streamtape': { func: this._streamtapeExtractor, useQuality: true }, 'mixdrop': { func: this._mixdropExtractor, useQuality: true }, 'krakenfiles': { func: this._krakenfilesExtractor, useQuality: true }, 'veev': { func: this._upstreamExtractor, useQuality: false }, 'thetube': { func: this._thetubeExtractor, useQuality: false },
+                'mp4upload': { func: this._mp4uploadExtractor, useQuality: true }, 'doodstream': { func: this._doodstreamExtractor, useQuality: true }, 'voe': { func: this._voeExtractor, useQuality: false }, 'streamwish': { func: this._streamwishExtractor, useQuality: false }, 'filemoon': { func: this._streamwishExtractor, useQuality: false }, 'bigwarp': { func: this._bigwarpExtractor, useQuality: false }, 'vidguard': { func: this._streamwishExtractor, useQuality: false }, 'vidhide': { func: this._streamwishExtractor, useQuality: false }, 'darkibox': { func: this._streamwishExtractor, useQuality: false }, 'hexupload': { func: this._streamwishExtractor, useQuality: false }, 'lulustream': { func: this._lulustreamExtractor, useQuality: false }, 'vadbam': { func: this._vidbomExtractor, useQuality: false }, 'streamtape': { func: this._streamtapeExtractor, useQuality: true }, 'mixdrop': { func: this._mixdropExtractor, useQuality: true }, 'krakenfiles': { func: this._krakenfilesExtractor, useQuality: true }, 'veev': { func: this._upstreamExtractor, useQuality: false }, 'thetube': { func: this._thetubeExtractor, useQuality: false },
             };
 
             for (const qualityData of apiData.props.streams.data) {
@@ -478,18 +484,17 @@ class DefaultExtension extends MProvider {
     }
     
     async _streamwishExtractor(url, prefix) {
-        const res = await this.client.get(url, this._getVideoHeaders(url));
-        const doc = new Document(res.body);
-        const scriptElement = doc.selectFirst("script:contains(m3u8)");
-        if (!scriptElement) return [];
-        let scriptContent = scriptElement.text;
-        if (scriptContent.includes("eval(function(p,a,c,k,e,d)")) {
-            scriptContent = unpackJs(scriptContent);
-        }
-        const masterUrl = scriptContent.match(/file:\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/)?.[1];
+        const res = await this.client.get(url, this.getHeaders(url));
+        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        if (!script) return [];
+
+        script = "eval(function(p,a,c,k,e,d)" + script;
+        const unpacked = unpackJs(script);
+        
+        const masterUrl = unpacked.match(/(https?:\/\/[^"]+\.m3u8[^"]*)/)?.[1];
         if (!masterUrl) return [];
-        const videoHeaders = { "Referer": `${new URL(url).origin}/`, "Origin": new URL(url).origin, "User-Agent": this.getHeaders(url)["User-Agent"] };
-        return this._parseM3U8(masterUrl, prefix, videoHeaders);
+        
+        return this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url));
     }
     
     async _vidbomExtractor(url, prefix = "VidBom") {
@@ -551,12 +556,15 @@ class DefaultExtension extends MProvider {
     }
 
     async _krakenfilesExtractor(url, quality) {
-        const getRes = await this.client.get(url, this.getHeaders(url));
-        const token = getRes.body.substringAfter('name="token" value="').substringBefore('"');
-        if (!token) return [];
-        const postRes = await this.client.post(url, { body: `token=${token}`, headers: { ...this.getHeaders(url), "Content-Type": "application/x-www-form-urlencoded" } });
-        const videoUrl = postRes.body.substringAfter('<source src="').substringBefore('"');
-        return videoUrl ? [{ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(quality, videoUrl), headers: this._getVideoHeaders(url) }] : [];
+        const res = await this.client.get(url, this.getHeaders(url));
+        const doc = new Document(res.body);
+        const videoUrl = doc.selectFirst("source[src]")?.getSrc;
+        return videoUrl ? [{ 
+            url: videoUrl, 
+            originalUrl: videoUrl, 
+            quality: this._formatQuality(quality, videoUrl), 
+            headers: this._getVideoHeaders(url) 
+        }] : [];
     }
 
     async _thetubeExtractor(url, prefix = "TheTube") {
@@ -568,38 +576,115 @@ class DefaultExtension extends MProvider {
         return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : [];
     }
 
+    async _bigwarpExtractor(url, prefix) {
+        const res = await this.client.get(url, this._getVideoHeaders(url));
+        const body = res.body;
+
+        const jwplayerSetup = body.substringAfter('jwplayer("vplayer").setup({').substringBefore('});');
+        if (!jwplayerSetup) return [];
+
+        const videos = [];
+        const sourceRegex = /{file:"([^"]+)",label:"([^"]+)"}/g;
+        const matches = [...jwplayerSetup.matchAll(sourceRegex)];
+
+        for (const match of matches) {
+            const videoUrl = match[1];
+            const qualityLabel = match[2]; 
+            const resolution = qualityLabel.split(' ')[0];
+            const finalQuality = `${prefix} - ${resolution}`;
+
+            videos.push({
+                url: videoUrl,
+                originalUrl: videoUrl,
+                quality: this._formatQuality(finalQuality, videoUrl),
+                headers: this._getVideoHeaders(url)
+            });
+        }
+        return videos;
+    }
+    
     async _allinoneExtractor(url, prefix) {
         try {
             const res = await this.client.get(url, this._getVideoHeaders(url));
-            let body = res.body;
+            const body = res.body;
+            const doc = new Document(body);
+            const videoHeaders = this._getVideoHeaders(url);
+            let sources = [];
 
-            if (body.includes("eval(function(p,a,c,k,e,d)")) {
-                const script = body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
-                if (script) body = unpackJs(script);
+            // --- Strategy 1: Direct HTML Tags ---
+            const directVideoSrc = doc.selectFirst("source[src]")?.getSrc || doc.selectFirst("video[src]")?.getSrc;
+            if (directVideoSrc) {
+                sources.push(directVideoSrc);
             }
 
-            const m3u8Match = body.match(/['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/);
-            if (m3u8Match && m3u8Match[1]) {
-                return await this._parseM3U8(m3u8Match[1], prefix, this._getVideoHeaders(url));
+            // --- Strategy 2: Unpack Obfuscated Scripts & Regex ---
+            let potentialScripts = body;
+            const packedScriptMatch = body.match(/eval\(function\(p,a,c,k,e,d\)\s?{.*}\)/);
+            if (packedScriptMatch) {
+                try {
+                    const unpacked = unpackJs(packedScriptMatch[0]);
+                    if (unpacked) potentialScripts += "\n" + unpacked;
+                } catch (e) { /* Unpacking failed, continue */ }
             }
 
-            const videoFileMatch = body.match(/['"](https?:\/\/[^'"]+\.(?:mp4|webm|mkv|mov)[^'"]*)['"]/);
-            if (videoFileMatch && videoFileMatch[1]) {
-                const videoUrl = videoFileMatch[1];
-                return [{ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(prefix, videoUrl), headers: this._getVideoHeaders(url) }];
+            // Regex for M3U8, MP4, and other video files
+            const urlRegex = /(https?:\/\/[^"' \s]+\.(?:m3u8|mp4|webm|mkv|mov|flv|avi))[^"' \s]*/ig;
+            let match;
+            while ((match = urlRegex.exec(potentialScripts)) !== null) {
+                sources.push(match[0]);
             }
+            
+            // --- Strategy 3: JSON Data in Script Tags ---
+            for (const scriptElement of doc.select("script")) {
+                const scriptContent = scriptElement.text;
+                if (!scriptContent.includes('{') || !scriptContent.includes('}')) continue;
 
-            const doc = new Document(res.body);
-            const sourceSrc = doc.selectFirst("source[src]")?.getSrc || doc.selectFirst("video[src]")?.getSrc;
-            if (sourceSrc) {
-                if (sourceSrc.includes('.m3u8')) {
-                    return await this._parseM3U8(sourceSrc, prefix, this._getVideoHeaders(url));
+                // Attempt to find and parse JSON-like objects within the script
+                const jsonRegex = /[{,\[]\s*["']?(?:file|src|source|url)["']?\s*:\s*["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/ig;
+                let jsonMatch;
+                while((jsonMatch = jsonRegex.exec(scriptContent)) !== null) {
+                    sources.push(jsonMatch[1]);
                 }
-                return [{ url: sourceSrc, originalUrl: sourceSrc, quality: this._formatQuality(prefix, sourceSrc), headers: this._getVideoHeaders(url) }];
             }
-            return [];
+
+            // --- Strategy 4: Follow iFrames (Recursive Call) ---
+            const iframe = doc.selectFirst("iframe[src]");
+            if (iframe) {
+                const iframeSrc = iframe.getSrc;
+                if (iframeSrc) {
+                    // Resolve relative iframe URL
+                    const iframeUrl = new URL(iframeSrc, url).href;
+                    // Avoid infinite loops and recursion on same domain
+                    if (new URL(iframeUrl).hostname !== new URL(url).hostname) {
+                         const iframeVideos = await this._allinoneExtractor(iframeUrl, `${prefix} (iFrame)`);
+                         if (iframeVideos.length > 0) return iframeVideos;
+                    }
+                }
+            }
+            
+            // --- Process all found sources ---
+            if (sources.length === 0) return [];
+            
+            // Remove duplicates and invalid entries
+            const uniqueSources = [...new Set(sources.filter(s => s && s.startsWith("http")))];
+
+            const allVideos = [];
+            for (const sourceUrl of uniqueSources) {
+                 if (sourceUrl.includes(".m3u8")) {
+                    allVideos.push(...await this._parseM3U8(sourceUrl, prefix, videoHeaders));
+                } else {
+                    allVideos.push({
+                        url: sourceUrl,
+                        originalUrl: sourceUrl,
+                        quality: this._formatQuality(prefix, sourceUrl),
+                        headers: videoHeaders
+                    });
+                }
+            }
+            return allVideos;
+
         } catch (e) {
-            return [];
+            return []; // Return empty on any catastrophic error
         }
     }
 
@@ -679,7 +764,7 @@ class DefaultExtension extends MProvider {
             switchPreferenceCompat: {
                 title: "استخدام مستخرج احتياطي (تجريبي)",
                 summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام.",
-                value: false,
+                value: true,
             }
         }];
     }
