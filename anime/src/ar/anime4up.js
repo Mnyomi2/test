@@ -42,12 +42,9 @@ class DefaultExtension extends MProvider {
         const headers = this.getHeaders(refererUrl);
         headers["Referer"] = refererUrl;
         try {
-            // Dynamically set the Origin header based on the referer URL's origin.
-            // This is crucial for many video hosters that check this header.
             const url = new URL(refererUrl);
             headers["Origin"] = url.origin;
         } catch (e) {
-            // Fallback to the base Origin if the refererUrl is somehow invalid.
             headers["Origin"] = this.getBaseUrl();
         }
         return headers;
@@ -337,7 +334,6 @@ class DefaultExtension extends MProvider {
         const dataOptions = res.body.substringAfter("data-options=\"").substringBefore("\"");
         if (!dataOptions) return [];
         const videoHeaders = this._getVideoHeaders("https://ok.ru/");
-        videoHeaders["Origin"] = "https://ok.ru";
         try {
             const json = JSON.parse(dataOptions.replace(/&quot;/g, '"'));
             const metadata = JSON.parse(json.flashvars.metadata);
@@ -484,17 +480,27 @@ class DefaultExtension extends MProvider {
     }
     
     async _streamwishExtractor(url, prefix) {
-        const res = await this.client.get(url, this.getHeaders(url));
+        const res = await this.client.get(url, this._getVideoHeaders(url));
         let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
         if (!script) return [];
 
         script = "eval(function(p,a,c,k,e,d)" + script;
         const unpacked = unpackJs(script);
         
-        const masterUrl = unpacked.match(/(https?:\/\/[^"]+\.m3u8[^"]*)/)?.[1];
-        if (!masterUrl) return [];
-        
-        return this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url));
+        const masterUrlMatch = unpacked.match(/sources:\s*\[\s*{\s*file:\s*"([^"]+)"/);
+        if (!masterUrlMatch) return [];
+
+        let masterUrl = masterUrlMatch[1];
+        if (masterUrl.startsWith("//")) {
+            masterUrl = "https:" + masterUrl;
+        }
+
+        const videoHeaders = {
+            "Referer": url,
+            "Origin": new URL(url).origin,
+            "User-Agent": this.getHeaders(url)["User-Agent"],
+        };
+        return this._parseM3U8(masterUrl, prefix, videoHeaders);
     }
     
     async _vidbomExtractor(url, prefix = "VidBom") {
