@@ -14,6 +14,8 @@ const mangayomiSources = [{
 
 
 
+
+
 // --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
@@ -54,7 +56,7 @@ class DefaultExtension extends MProvider {
     async fetchAndParseCataloguePage(path) {
         const url = this.getBaseUrl() + path;
         const res = await this.client.get(url, this.getHeaders(url));
-        const doc = new Document(res.body);
+        const doc = new Document(res.bodyBytes.toString("UTF-8"));
 
         const list = [];
         const items = doc.select(".anime-card-container, div.row.posts-row article");
@@ -142,7 +144,9 @@ class DefaultExtension extends MProvider {
 
     async getDetail(url) {
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
-        const doc = new Document(res.body);
+        // Decode the response body as UTF-8 to handle incorrect server encoding headers
+        const body = res.bodyBytes.toString("UTF-8");
+        const doc = new Document(body);
         const name = doc.selectFirst("h1.anime-details-title").text;
         const imageUrl = doc.selectFirst("div.anime-thumbnail img.thumbnail").getSrc;
         const description = doc.selectFirst("p.anime-story").text;
@@ -166,7 +170,7 @@ class DefaultExtension extends MProvider {
 
     async getVideoList(url) {
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
-        const doc = new Document(res.body);
+        const doc = new Document(res.bodyBytes.toString("UTF-8"));
         let videos = [];
         const hosterSelection = this.getPreference("hoster_selection") || [];
         const genericVideoHeaders = this._getVideoHeaders(this.getBaseUrl() + url);
@@ -309,7 +313,8 @@ class DefaultExtension extends MProvider {
     
     async _vidmolyExtractor(url, prefix) {
         const res = await this.client.get(url, this._getVideoHeaders(url));
-        const script = res.body.substringAfter("sources: [").substringBefore("]");
+        const body = res.bodyBytes.toString("UTF-8");
+        const script = body.substringAfter("sources: [").substringBefore("]");
         if (!script) return [];
         const hlsUrl = script.match(/file:"([^"]+)"/)?.[1];
         if (!hlsUrl || !hlsUrl.includes(".m3u8")) return [];
@@ -327,7 +332,8 @@ class DefaultExtension extends MProvider {
 
     async _megamaxExtractor(url, prefix) {
         const res = await this.client.get(url, this.getHeaders(url));
-        let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
+        const body = res.bodyBytes.toString("UTF-8");
+        let script = body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>");
         if (!script) return [];
         script = "eval(function(p,a,c,k,e,d)" + script;
         const unpacked = unpackJs(script);
@@ -339,7 +345,8 @@ class DefaultExtension extends MProvider {
     async _vkExtractor(url, prefix = "VK") {
         const videoHeaders = { ...this._getVideoHeaders("https://vk.com/"), "Origin": "https://vk.com" };
         const res = await this.client.get(url, videoHeaders);
-        const matches = [...res.body.matchAll(/"url(\d+)":"(.*?)"/g)];
+        const body = res.bodyBytes.toString("UTF-8");
+        const matches = [...body.matchAll(/"url(\d+)":"(.*?)"/g)];
         return matches.map(match => {
             const qualityLabel = `${prefix} ${match[1]}p`;
             const videoUrl = match[2].replace(/\\/g, '');
