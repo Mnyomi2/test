@@ -766,7 +766,7 @@ class DefaultExtension extends MProvider {
                 summary: "اختر السيرفرات التي تريد ان تظهر",
                 entries: serverEntries,
                 entryValues: serverEntryValues,
-                values: serverEntryValues,
+                values: ["mp4upload", "vk"],
             }
         }, {
             key: "extract_qualities",
