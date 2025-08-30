@@ -78,7 +78,7 @@ class DefaultExtension extends MProvider {
         if (q.includes("fhd") || q.includes("1080") || q.includes("1040")) return "1080p";
         if (q.includes("hd") || q.includes("720")) return "720p";
         if (q.includes("sd") || q.includes("480")) return "480p";
-        return "720p"; // Default quality
+        return "1080p";
     }
     
     _formatQuality(baseQuality, url) {
@@ -755,7 +755,7 @@ class DefaultExtension extends MProvider {
             listPreference: {
                 title: "الجودة المفضلة",
                 summary: "اختر الجودة التي سيتم اختيارها تلقائيا",
-                valueIndex: 1,
+                valueIndex: 0,
                 entries: ["1080p", "720p", "480p", "360p"],
                 entryValues: ["1080", "720", "480", "360"],
             }
@@ -773,7 +773,7 @@ class DefaultExtension extends MProvider {
             switchPreferenceCompat: {
                 title: "استخراج الجودات المتعددة (HLS)",
                 summary: "عند تفعيله، سيقوم بجلب جميع الجودات المتاحة من السيرفرات الداعمة.",
-                value: true, 
+                value: false, 
             }
         }, {
             key: "show_video_url_in_quality",
@@ -794,7 +794,7 @@ class DefaultExtension extends MProvider {
             switchPreferenceCompat: {
                 title: "استخدام مستخرج احتياطي (تجريبي)",
                 summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام.",
-                value: true,
+                value: false,
             }
         }];
     }
