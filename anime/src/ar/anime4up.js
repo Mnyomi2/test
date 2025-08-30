@@ -772,28 +772,28 @@ class DefaultExtension extends MProvider {
             key: "extract_qualities",
             switchPreferenceCompat: {
                 title: "استخراج الجودات المتعددة (HLS)",
-                summary: "عند تفعيله، سيقوم بجلب جميع الجودات المتاحة من السيرفرات الداعمة.",
+                summary: "عند تفعيله سيقوم بجلب جميع الجودات المتاحة من السيرفرات الداعمة",
                 value: false, 
             }
         }, {
             key: "show_video_url_in_quality",
             switchPreferenceCompat: {
                 title: "إظهار رابط الفيديو",
-                summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة.",
+                summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة",
                 value: false,
             }
         }, {
             key: "show_embed_url_in_quality",
             switchPreferenceCompat: {
                 title: "إظهار رابط التضمين (للتصحيح)",
-                summary: "عرض رابط التضمين الأولي بجانب اسم الجودة (لأغراض التصحيح).",
+                summary: "عرض رابط التضمين الأولي بجانب اسم الجودة (لأغراض التصحيح)",
                 value: false,
             }
         }, {
             key: "use_fallback_extractor",
             switchPreferenceCompat: {
                 title: "استخدام مستخرج احتياطي (تجريبي)",
-                summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام.",
+                summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام",
                 value: false,
             }
         }];
