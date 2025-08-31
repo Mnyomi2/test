@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=witanime.rest",
     "typeSource": "single",
     "itemType": 1,
-    "version": "2.0.3",
+    "version": "2.0.2",
     "pkgPath": "anime/src/ar/witanime.js"
 }];
 
@@ -352,4 +352,5 @@ class DefaultExtension extends MProvider {
         }
     }
 }
+
 
