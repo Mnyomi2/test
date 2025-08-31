@@ -10,22 +10,9 @@ const mangayomiSources = [{
     "version": "2.0.3",
     "pkgPath": "anime/src/ar/witanime.js"
 }];
-// mangayomiSources array is for metadata and not part of the class implementation.
-const mangayomiSources = [{
-    "name": "WitAnime",
-    "id": 984372845,
-    "lang": "ar",
-    "baseUrl": "https://witanime.com",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://witanime.com",
-    "typeSource": "multi",
-    "itemType": 1,
-    "version": "2.0.8", // Version bump for the definitive fix
-    "pkgPath": "anime/src/ar/witanime.js"
-}];
 
-/**
- * Helper function to deobfuscate JavaScript code often used by video hosts.
- */
+
+
 function unpackJs(packedJS) {
     try {
         const match = packedJS.match(/}\s*\('(.*)',\s*(\d+),\s*(\d+),\s*'(.*?)'\.split\('\|'\)/);
@@ -365,3 +352,4 @@ class DefaultExtension extends MProvider {
         }
     }
 }
+
