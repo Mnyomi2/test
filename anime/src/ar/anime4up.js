@@ -1,14 +1,14 @@
 // --- METADATA ---
 const mangayomiSources = [{
-    "name": "Anime4up",
-    "id": 8374956845,
+    "name": "Anime4up V2",
+    "id": 8374956840,
     "lang": "ar",
     "baseUrl": "https://ww.anime4up.rest",
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=ww.anime4up.rest",
     "typeSource": "single",
     "itemType": 1,
     "version": "1.5.5",
-    "pkgPath": "anime/src/ar/anime4up.js"
+    "pkgPath": "anime/src/ar/anime4upv2.js"
 }];
 
 
@@ -424,6 +424,7 @@ class DefaultExtension extends MProvider {
     }
 
     async _megamaxExtractor(url, prefix) {
+        const selectedDrivers = this.getPreference("megamax_driver_selection") || [];
         const allVideos = [];
         const showEmbedUrl = this.getPreference("show_embed_url_in_quality");
         try {
@@ -437,12 +438,39 @@ class DefaultExtension extends MProvider {
             if (apiData?.props?.streams?.status !== "success") return [];
             
             const driverToExtractor = {
-                'mp4upload': { func: this._mp4uploadExtractor, useQuality: true }, 'doodstream': { func: this._doodstreamExtractor, useQuality: true }, 'voe': { func: this._voeExtractor, useQuality: false }, 'streamwish': { func: this._streamwishExtractor, useQuality: false }, 'filemoon': { func: this._filemoonExtractor, useQuality: false }, 'bigwarp': { func: this._bigwarpExtractor, useQuality: false }, 'vidguard': { func: this._vidguardExtractor, useQuality: false }, 'vidhide': { func: this._streamwishExtractor, useQuality: false }, 'darkibox': { func: this._streamwishExtractor, useQuality: false }, 'hexupload': { func: this._streamwishExtractor, useQuality: false }, 'lulustream': { func: this._lulustreamExtractor, useQuality: false }, 'vadbam': { func: this._vidbomExtractor, useQuality: false }, 'streamtape': { func: this._streamtapeExtractor, useQuality: true }, 'mixdrop': { func: this._mixdropExtractor, useQuality: true }, 'krakenfiles': { func: this._krakenfilesExtractor, useQuality: true }, 'veev': { func: this._upstreamExtractor, useQuality: false }, 'thetube': { func: this._thetubeExtractor, useQuality: false },
+                'mp4upload': { func: this._mp4uploadExtractor, useQuality: true },
+                'doodstream': { func: this._doodstreamExtractor, useQuality: true },
+                'okru': { func: this._okruExtractor, useQuality: false },
+                'voe': { func: this._voeExtractor, useQuality: false },
+                'vidmoly': { func: this._vidmolyExtractor, useQuality: false },
+                'uqload': { func: this._uqloadExtractor, useQuality: true },
+                'vk': { func: this._vkExtractor, useQuality: false },
+                'videa': { func: this._videaExtractor, useQuality: true },
+                'dailymotion': { func: this._dailymotionExtractor, useQuality: false },
+                'sendvid': { func: this._sendvidExtractor, useQuality: true },
+                'streamtape': { func: this._streamtapeExtractor, useQuality: true },
+                'streamwish': { func: this._streamwishExtractor, useQuality: false },
+                'filemoon': { func: this._filemoonExtractor, useQuality: false },
+                'vidguard': { func: this._vidguardExtractor, useQuality: false },
+                'darkibox': { func: this._streamwishExtractor, useQuality: false },
+                'hexupload': { func: this._streamwishExtractor, useQuality: false },
+                'bigwarp': { func: this._bigwarpExtractor, useQuality: false },
+                'vadbam': { func: this._vidbomExtractor, useQuality: false },
+                'lulustream': { func: this._lulustreamExtractor, useQuality: false },
+                'mixdrop': { func: this._mixdropExtractor, useQuality: true },
+                'streamruby': { func: this._streamrubyExtractor, useQuality: false },
+                'veev': { func: this._upstreamExtractor, useQuality: false },
+                'krakenfiles': { func: this._krakenfilesExtractor, useQuality: true },
+                'thetube': { func: this._thetubeExtractor, useQuality: false },
+                'vidhide': { func: this._streamwishExtractor, useQuality: false },
             };
 
             for (const qualityData of apiData.props.streams.data) {
                 const qualityLabel = qualityData.label.replace(' (source)', '').trim();
                 for (const mirror of qualityData.mirrors) {
+                    if (!selectedDrivers.includes(mirror.driver)) {
+                        continue;
+                    }
                     const extractorData = driverToExtractor[mirror.driver];
                     if (!extractorData) continue; 
 
@@ -793,6 +821,18 @@ class DefaultExtension extends MProvider {
             "vidbom", "lulustream", 
             "mixdrop", "streamruby", "upstream", "krakenfiles", "thetube", "mega"
         ];
+        const megamaxDriverEntries = [
+            "Mp4upload", "DoodStream", "Ok.ru", "Voe.sx", "Vidmoly", "Uqload", "VK", "Videa",
+            "Dailymotion", "Sendvid", "StreamTape", "StreamWish", "Filemoon", "VidGuard",
+            "Darkibox", "Hexload", "BigWarp", "VidBom", "Lulustream", "MixDrop", "StreamRuby",
+            "Upstream/Veev", "KrakenFiles", "TheTube", "VidHide"
+        ];
+        const megamaxDriverEntryValues = [
+            "mp4upload", "doodstream", "okru", "voe", "vidmoly", "uqload", "vk", "videa",
+            "dailymotion", "sendvid", "streamtape", "streamwish", "filemoon", "vidguard",
+            "darkibox", "hexupload", "bigwarp", "vadbam", "lulustream", "mixdrop", "streamruby",
+            "veev", "krakenfiles", "thetube", "vidhide"
+        ];
         return [{
             key: "override_base_url",
             editTextPreference: {
@@ -819,6 +859,15 @@ class DefaultExtension extends MProvider {
                 entries: serverEntries,
                 entryValues: serverEntryValues,
                 values: ["mp4upload"],
+            }
+        }, {
+            key: "megamax_driver_selection",
+            multiSelectListPreference: {
+                title: "اختر سيرفرات MegaMax الداخلية",
+                summary: "يعمل فقط عند تفعيل سيرفر MegaMax. اختر السيرفرات التي سيتم استخراجها.",
+                entries: megamaxDriverEntries,
+                entryValues: megamaxDriverEntryValues,
+                values: megamaxDriverEntryValues,
             }
         }, {
             key: "extract_qualities",
