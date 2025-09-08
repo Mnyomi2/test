@@ -11,6 +11,7 @@ const mangayomiSources = [{
 }];
 
 
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -172,84 +173,89 @@ class DefaultExtension extends MProvider {
     // --- VIDEO EXTRACTION ---
 
     async getVideoList(url) {
-        const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
+        const pageUrl = this.getBaseUrl() + url;
+        const res = await this.client.get(pageUrl, this.getHeaders(pageUrl));
         const doc = new Document(res.body);
         const hosterSelection = this.getPreference("hoster_selection") || [];
         const showEmbedUrl = this.getPreference("show_embed_url_in_quality");
         const videos = [];
 
         const extractorMap = [
+            { key: 'vidtube',    domains: ['vidtube.pro'],    func: this._streamwishExtractor, useQuality: false }, // Vidtube is often a StreamWish variant
+            { key: 'updown',     domains: ['up-down.to'],     func: this._streamwishExtractor, useQuality: false }, // UpDown is often a StreamWish variant
+            { key: 'filelions',  domains: ['filelions.to'],   func: this._streamwishExtractor, useQuality: false }, // FileLions is a StreamWish variant
             { key: 'mp4upload',  domains: ['mp4upload'],      func: this._mp4uploadExtractor,  useQuality: true },
-            { key: 'dood',       domains: ['dood', 'd-s.io', 'vide0.net'], func: this._doodstreamExtractor, useQuality: true },
+            { key: 'dood',       domains: ['dood', 'd-s.io'], func: this._doodstreamExtractor, useQuality: true },
             { key: 'okru',       domains: ['ok.ru'],          func: this._okruExtractor,       useQuality: false },
             { key: 'voe',        domains: ['voe.sx'],         func: this._voeExtractor,        useQuality: false },
             { key: 'vidmoly',    domains: ['vidmoly'],        func: this._vidmolyExtractor,    useQuality: false },
             { key: 'uqload',     domains: ['uqload'],         func: this._uqloadExtractor,     useQuality: true },
             { key: 'megamax',    domains: ['megamax'],        func: this._megamaxExtractor,    useQuality: false },
-            { key: 'vk',         domains: ['vk.com', 'vkvideo.ru'], func: this._vkExtractor,   useQuality: false },
+            { key: 'vk',         domains: ['vk.com'],         func: this._vkExtractor,   useQuality: false },
             { key: 'videa',      domains: ['videa.hu'],       func: this._videaExtractor,      useQuality: true },
             { key: 'dailymotion',domains: ['dailymotion'],    func: this._dailymotionExtractor,useQuality: false },
             { key: 'sendvid',    domains: ['sendvid'],        func: this._sendvidExtractor,    useQuality: true },
             { key: 'streamtape', domains: ['streamtape'],     func: this._streamtapeExtractor, useQuality: true },
-            { key: 'streamwish', domains: ['streamwish', 'anime4low.sbs'], func: this._streamwishExtractor, useQuality: false },
+            { key: 'streamwish', domains: ['streamwish'],     func: this._streamwishExtractor, useQuality: false },
             { key: 'filemoon',   domains: ['filemoon'],       func: this._filemoonExtractor, useQuality: false },
-            { key: 'vidguard',   domains: ['vidguard', 'mivalyo'], func: this._vidguardExtractor, useQuality: false },
-            { key: 'darkibox',   domains: ['darkibox'],       func: this._streamwishExtractor, useQuality: false },
-            { key: 'hexload',    domains: ['hexload'],        func: this._streamwishExtractor, useQuality: false },
-            { key: 'bigwarp',    domains: ['bigwarp'],        func: this._bigwarpExtractor, useQuality: false },
-            { key: 'vidbom',     domains: ['vidbom', 'vidbam', 'vbshar', 'vdbtm'], func: this._vidbomExtractor, useQuality: false },
-            { key: 'lulustream', domains: ['luluvid', 'luluvdo'], func: this._lulustreamExtractor, useQuality: false },
-            { key: 'mixdrop',    domains: ['mixdrop', 'mxdrop'], func: this._mixdropExtractor,  useQuality: true },
-            { key: 'streamruby', domains: ['streamruby', 'rubyvid'], func: this._streamrubyExtractor, useQuality: false },
-            { key: 'upstream',   domains: ['upstream', 'veev'],       func: this._upstreamExtractor,   useQuality: false },
-            { key: 'krakenfiles',domains: ['krakenfiles'], func: this._krakenfilesExtractor, useQuality: true },
-            { key: 'thetube',    domains: ['they.tube'], func: this._thetubeExtractor, useQuality: false },
+            { key: 'vidguard',   domains: ['vidguard'],       func: this._vidguardExtractor, useQuality: false },
+            { key: 'lulustream', domains: ['luluvid'],        func: this._lulustreamExtractor, useQuality: false },
+            { key: 'mixdrop',    domains: ['mixdrop'],        func: this._mixdropExtractor,  useQuality: true },
+            { key: 'streamruby', domains: ['streamruby'],     func: this._streamrubyExtractor, useQuality: false },
+            { key: 'upstream',   domains: ['upstream'],       func: this._upstreamExtractor,   useQuality: false },
         ];
 
-        for (const element of doc.select('#episode-servers li a')) {
+        // The endpoint for fetching the server iframe
+        const serverApiUrl = `${this.getBaseUrl()}/wp-content/themes/movies2023/Ajaxat/Single/Server.php`;
+
+        // Iterate over the server list items provided in the new HTML structure
+        for (const element of doc.select(".watch--servers--list li.server--item")) {
             let streamUrl = null;
-            let qualityPrefix = null;
             let serverNameText = null;
+            let qualityPrefix = null;
+
             try {
-                streamUrl = element.attr('data-ep-url');
+                const postId = element.attr('data-id');
+                const serverIndex = element.attr('data-server');
+                serverNameText = element.selectFirst('span')?.text.trim();
+
+                if (!postId || !serverIndex || !serverNameText) continue;
+
+                const serverKey = serverNameText.toLowerCase().replace('stream','');
+                if (!hosterSelection.includes(serverKey) && !hosterSelection.some(h => serverNameText.toLowerCase().includes(h))) {
+                    continue;
+                }
+
+                // Make the POST request to get the iframe URL
+                const postBody = `id=${postId}&i=${serverIndex}`;
+                const postHeaders = {
+                    "Accept": "*/*",
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": pageUrl,
+                    "Origin": this.getBaseUrl(),
+                };
+
+                const postRes = await this.client.post(serverApiUrl, { headers: postHeaders, body: postBody });
+                const iframeDoc = new Document(postRes.body);
+                streamUrl = iframeDoc.selectFirst("iframe")?.getSrc;
+
                 if (!streamUrl) continue;
-                streamUrl = streamUrl.replace(/&amp;/g, '&');
+                
                 if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
-                if (streamUrl.includes("vidmoly.to")) streamUrl = streamUrl.replace("vidmoly.to", "vidmoly.net");
-
-                const qualityText = element.text.trim();
-                const extractor = extractorMap.find(ext =>
-                    hosterSelection.includes(ext.key) && ext.domains.some(d => streamUrl.toLowerCase().includes(d))
-                );
-
-                const numericQuality = this.getNumericQuality(qualityText);
-                serverNameText = qualityText.split(' - ')[0].trim();
-                qualityPrefix = `${serverNameText} - ${numericQuality}`;
+                
+                const extractor = extractorMap.find(ext => ext.domains.some(d => streamUrl.toLowerCase().includes(d)));
+                
+                qualityPrefix = serverNameText; // The quality is unknown at this stage, so we just use the server name
                 if (showEmbedUrl) {
                     qualityPrefix += ` [${streamUrl}]`;
                 }
 
-                let foundVideos = false;
                 if (extractor) {
-                    let prefixForExtractor;
-                    if (serverNameText.toLowerCase().includes("megamax")) {
-                        prefixForExtractor = serverNameText;
-                    } else {
-                        prefixForExtractor = qualityPrefix;
-                    }
-
-                    const extractedVideos = await extractor.func.call(this, streamUrl, prefixForExtractor);
+                    const extractedVideos = await extractor.func.call(this, streamUrl, qualityPrefix);
                     if (extractedVideos && extractedVideos.length > 0) {
                         videos.push(...extractedVideos);
-                        foundVideos = true;
                     }
-                } else if (hosterSelection.includes("mega") && streamUrl.toLowerCase().includes("mega.nz")) {
-                    videos.push({ url: streamUrl, quality: qualityPrefix, headers: this._getVideoHeaders(streamUrl) });
-                    foundVideos = true;
-                }
-
-                if (!foundVideos) {
-                    throw new Error("No specific extractor found or extractor failed.");
                 }
 
             } catch (e) {
@@ -361,8 +367,6 @@ class DefaultExtension extends MProvider {
     }
 
     async _doodstreamExtractor(url, quality) {
-        // This method uses the download page to find the direct video link.
-        // It can be more reliable than the pass_md5 method which changes frequently.
         try {
             const videoId = url.split('/').pop();
             if (!videoId) return [];
@@ -834,18 +838,16 @@ class DefaultExtension extends MProvider {
 
     getSourcePreferences() {
         const serverEntries = [
-            "DoodStream", "Voe.sx", "Mp4upload", "Ok.ru", "Vidmoly", "Uqload", 
-            "MegaMax", "VK", "Videa", "Dailymotion", "Sendvid", "StreamTape", 
-            "StreamWish", "Filemoon", "VidGuard/Mivalyo", "Darkibox", "Hexload", "BigWarp",
-            "VidBom/VidShare", "Lulustream", 
-            "MixDrop", "StreamRuby", "Upstream/Veev", "KrakenFiles", "TheTube", "Mega.nz (WebView only)"
+            "Doodstream", "StreamWish", "Filemoon", "Mp4upload", "Voe.sx", "Streamtape", "LuluStream", "Uqload", "Mixdrop",
+            "VidTube", "UpDown", "FileLions",
+            "Ok.ru", "Vidmoly", "MegaMax", "VK", "Videa", "Dailymotion", "Sendvid", "VidGuard/Mivalyo", 
+            "StreamRuby", "Upstream/Veev", "Mega.nz (WebView only)"
         ];
         const serverEntryValues = [
-            "dood", "voe", "mp4upload", "okru", "vidmoly", "uqload", 
-            "megamax", "vk", "videa", "dailymotion", "sendvid", "streamtape",
-            "streamwish", "filemoon", "vidguard", "darkibox", "hexload", "bigwarp",
-            "vidbom", "lulustream", 
-            "mixdrop", "streamruby", "upstream", "krakenfiles", "thetube", "mega"
+            "dood", "wish", "filemoon", "mp4upload", "voe", "tape", "lulu", "uqload", "mixdrop",
+            "vidtube", "updown", "filelions",
+            "okru", "vidmoly", "megamax", "vk", "videa", "dailymotion", "sendvid", "vidguard",
+            "ruby", "upstream", "mega"
         ];
         const megamaxDriverEntries = [
             "Mp4upload", "DoodStream", "Ok.ru", "Voe.sx", "Vidmoly", "Uqload", "VK", "Videa",
@@ -884,7 +886,7 @@ class DefaultExtension extends MProvider {
                 summary: "اختر السيرفرات التي تريد ان تظهر",
                 entries: serverEntries,
                 entryValues: serverEntryValues,
-                values: ["dood", "streamwish", "voe", "vidguard", "filemoon", "mp4upload"],
+                values: ["dood", "wish", "filemoon", "mp4upload", "voe", "tape", "vidtube", "updown"],
             }
         }, {
             key: "megamax_driver_selection",
