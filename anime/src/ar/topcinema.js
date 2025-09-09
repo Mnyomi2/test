@@ -10,7 +10,6 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
-
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -37,67 +36,23 @@ class DefaultExtension extends MProvider {
     async getVideoList(url) {
         const allStreams = [];
         const fetchMode = this.getPreference("link_fetch_mode") || "both";
-
-        if (fetchMode === "watch" || fetchMode === "both") {
-            const watchStreams = await this._getWatchLinks(url);
-            allStreams.push(...watchStreams);
-        }
-        if (fetchMode === "download" || fetchMode === "both") {
-            const downloadStreams = await this._getDownloadLinks(url);
-            allStreams.push(...downloadStreams);
-        }
-
+        if (fetchMode === "watch" || fetchMode === "both") { allStreams.push(...await this._getWatchLinks(url)); }
+        if (fetchMode === "download" || fetchMode === "both") { allStreams.push(...await this._getDownloadLinks(url)); }
         const uniqueStreams = Array.from(new Map(allStreams.map(item => [item.originalUrl, item])).values());
-        
         const preferredQuality = this.getPreference("preferred_quality") || "720";
-        uniqueStreams.sort((a, b) => {
-            const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0), qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0);
-            return (qualityB + (b.quality.includes(preferredQuality) ? 10000 : 0)) - (qualityA + (a.quality.includes(preferredQuality) ? 10000 : 0));
-        });
+        uniqueStreams.sort((a, b) => { const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0), qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0); return (qualityB + (b.quality.includes(preferredQuality) ? 10000 : 0)) - (qualityA + (a.quality.includes(preferredQuality) ? 10000 : 0)); });
         return uniqueStreams;
     }
 
     // --- LINK GATHERING ---
     async _getWatchLinks(url) {
         const videos = [];
-        const processedUrls = new Set();
-        const hosterSelection = this.getPreference("hoster_selection") || [];
         const watchUrl = url.endsWith('/watch/') ? url : (url.endsWith('/') ? `${url}watch/` : `${url}/watch/`);
-        
-        const processServer = async (iframeSrc, serverName) => {
-            if (!iframeSrc || processedUrls.has(iframeSrc)) return;
-            processedUrls.add(iframeSrc);
-            const initialVideoCount = videos.length;
-            try {
-                let foundVideos = false;
-                const extractor = this.extractorMap.find(ext => hosterSelection.includes(ext.key) && ext.domains.some(d => iframeSrc.includes(d)));
-                if (extractor) {
-                    const extracted = await extractor.func.call(this, iframeSrc, serverName);
-                    if (extracted.length > 0) { videos.push(...extracted); foundVideos = true; }
-                }
-                if (!foundVideos && this.getPreference("use_fallback_extractor")) {
-                    const fallbackVideos = await this._allinoneExtractor(iframeSrc, `[Fallback] ${serverName}`);
-                    if (fallbackVideos.length > 0) { videos.push(...fallbackVideos); foundVideos = true; }
-                }
-                if (!foundVideos && hosterSelection.includes('other')) {
-                    let quality = `[Embed] ${serverName}`;
-                    if (this.getPreference("show_embed_url_in_quality")) quality += ` [${iframeSrc}]`;
-                    videos.push({ url: iframeSrc, originalUrl: iframeSrc, quality: quality });
-                }
-            } finally {
-                const videosAdded = videos.length - initialVideoCount;
-                if (videosAdded === 0 && this.getPreference("show_embed_url_in_quality")) {
-                    videos.push({ url: "", originalUrl: iframeSrc || serverName, quality: `[Debug Fail] ${serverName} [${iframeSrc || 'No URL Found'}]` });
-                }
-            }
-        };
-
         try {
             const doc = await this.requestDoc(watchUrl.replace(this.getBaseUrl(), ''));
             const initialIframeSrc = doc.selectFirst("div.player--iframe iframe")?.getSrc;
             const initialServerName = doc.selectFirst("li.server--item.active span")?.text.trim() || "Default Server";
-            await processServer(initialIframeSrc, initialServerName);
-            
+            await this._processLink(videos, initialIframeSrc, initialServerName);
             for (const serverEl of doc.select("li.server--item")) {
                 let serverName = serverEl.selectFirst("span")?.text.trim();
                 try {
@@ -107,68 +62,63 @@ class DefaultExtension extends MProvider {
                     const ajaxUrl = `${this.getBaseUrl()}/wp-content/themes/movies2023/Ajaxat/Single/Server.php`;
                     const res = await this.client.post(ajaxUrl, { headers: ajaxHeaders, body: `id=${dataId}&i=${dataServer}` });
                     const iframeSrc = new Document(res.body).selectFirst("iframe")?.getSrc;
-                    await processServer(iframeSrc, serverName);
-                } catch (e) {
-                    if (this.getPreference("show_embed_url_in_quality")) { videos.push({ url: "", originalUrl: serverName, quality: `[Debug AJAX Error] ${serverName}` }); }
-                }
+                    await this._processLink(videos, iframeSrc, serverName);
+                } catch (e) { if (this.getPreference("show_embed_url_in_quality")) { videos.push({ url: "", originalUrl: serverName, quality: `[Debug AJAX Error] ${serverName}` }); } }
             }
         } catch (e) {}
         return videos;
     }
-
     async _getDownloadLinks(url) {
         const videos = [];
-        const hosterSelection = this.getPreference("hoster_selection") || [];
         const downloadPageUrl = url.replace(/\/watch\/?$/, '') + (url.endsWith('/') ? 'download/' : '/download/');
         try {
             const doc = await this.requestDoc(downloadPageUrl.replace(this.getBaseUrl(), ''));
-            for (const linkEl of doc.select("a.downloadsLink")) {
-                try {
-                    let href = linkEl.getHref;
-                    let embedUrl = href;
+            const proServerLink = doc.selectFirst("div.proServer a.downloadsLink");
+            if(proServerLink) {
+                const serverName = proServerLink.selectFirst(".text span")?.text.trim();
+                await this._processLink(videos, proServerLink.getHref, `[DL] ${serverName}`);
+            }
+            for (const block of doc.select("div.DownloadBlock")) {
+                const qualityLabel = block.selectFirst("h2.download-title span")?.text.trim();
+                for (const linkEl of block.select("a.downloadsLink")) {
                     const serverName = linkEl.selectFirst(".text span")?.text.trim();
-                    if (!serverName) continue;
-
-                    // --- URL Transformation Logic ---
-                    if (href.includes("vidtube.pro/d/")) {
-                        embedUrl = href.replace("/d/", "/embed-");
-                    } else if (href.includes("updown.cam/")) {
-                        const fileId = href.split('/').pop();
-                        embedUrl = `https://updown.cam/embed-${fileId}.html`;
-                    } else if (href.includes("savefiles.com/")) {
-                        const fileId = href.split('/').pop();
-                        embedUrl = `https://savefiles.com/e/${fileId}`;
-                    }
-                    
-                    const extractor = this.extractorMap.find(ext => hosterSelection.includes(ext.key) && ext.domains.some(d => embedUrl.includes(d)));
-                    if (extractor) {
-                        const extracted = await extractor.func.call(this, embedUrl, `[DL] ${serverName}`);
-                        if (extracted.length > 0) videos.push(...extracted);
-                    }
-                } catch(e) {}
+                    const prefix = `[DL] ${serverName}` + (qualityLabel ? ` - ${qualityLabel}` : '');
+                    await this._processLink(videos, linkEl.getHref, prefix);
+                }
             }
         } catch(e) {}
         return videos;
     }
+    
+    // --- UNIVERSAL LINK PROCESSING LOGIC ---
+    async _processLink(videoList, url, prefix) {
+        const processedUrls = new Set(videoList.map(v => v.originalUrl));
+        if (!url || processedUrls.has(url)) return;
+        const hosterSelection = this.getPreference("hoster_selection") || [];
+        const initialVideoCount = videoList.length;
+        let embedUrl = url;
+        if (url.includes("vidtube.pro/d/")) embedUrl = url.replace("/d/", "/embed-");
+        else if (url.includes("updown.cam/")) embedUrl = `https://updown.cam/embed-${url.split('/').pop()}.html`;
+        else if (url.includes("savefiles.com/")) embedUrl = `https://savefiles.com/e/${url.split('/').pop()}`;
+        try {
+            let foundVideos = false;
+            const extractor = this.extractorMap.find(ext => hosterSelection.includes(ext.key) && ext.domains.some(d => embedUrl.includes(d)));
+            if (extractor) { const extracted = await extractor.func.call(this, embedUrl, prefix); if (extracted.length > 0) { videoList.push(...extracted); foundVideos = true; } }
+            if (!foundVideos && this.getPreference("use_fallback_extractor")) { const fallbackVideos = await this._allinoneExtractor(embedUrl, `[Fallback] ${prefix}`); if (fallbackVideos.length > 0) { videoList.push(...fallbackVideos); foundVideos = true; } }
+            if (!foundVideos && hosterSelection.includes('other') && !prefix.startsWith('[DL]')) { let quality = `[Embed] ${prefix}`; if (this.getPreference("show_embed_url_in_quality")) quality += ` [${embedUrl}]`; videoList.push({ url: embedUrl, originalUrl: embedUrl, quality: quality }); }
+        } finally {
+            const videosAdded = videoList.length - initialVideoCount;
+            if (videosAdded === 0 && this.getPreference("show_embed_url_in_quality")) { const quality = `[Debug Fail] ${prefix} [${embedUrl}]`; videoList.push({ url: "", originalUrl: embedUrl, quality: quality }); }
+        }
+    }
 
     // --- EXTRACTORS ---
-    extractorMap = [
-        { key: 'vidtube',    domains: ['vidtube.pro'],  func: this._vidtubeExtractor },
-        { key: 'updown',     domains: ['updown.cam'],   func: this._updownExtractor },
-        { key: 'savefiles',  domains: ['savefiles.com'],func: this._savefilesExtractor },
-        { key: 'dood',       domains: ['d0o0d.com', 'dood.yt'],  func: this._doodstreamExtractor },
-        { key: 'streamwish', domains: ['streamwish.fun', 'vidhide.fun', 'filelions.to'], func: this._streamwishExtractor },
-        { key: 'streamtape', domains: ['streamtape.cc'],  func: this._streamtapeExtractor },
-        { key: 'lulustream', domains: ['luluvdo.com'],    func: this._lulustreamExtractor },
-        { key: 'uqload',     domains: ['uqload.cx'],      func: this._uqloadExtractor },
-        { key: 'filemoon',   domains: ['filemoon.sx'],    func: this._filemoonExtractor },
-        { key: 'mixdrop',    domains: ['mixdrop.ps'],     func: this._mixdropExtractor },
-    ];
+    extractorMap = [ { key: 'vidtube',    domains: ['vidtube.pro'],  func: this._vidtubeExtractor }, { key: 'updown',     domains: ['updown.cam'],   func: this._updownExtractor }, { key: 'savefiles',  domains: ['savefiles.com'],func: this._savefilesExtractor }, { key: 'dood',       domains: ['d0o0d.com', 'dood.yt'],  func: this._doodstreamExtractor }, { key: 'streamwish', domains: ['streamwish.fun', 'vidhide.fun', 'filelions.to'], func: this._streamwishExtractor }, { key: 'streamtape', domains: ['streamtape.cc'],  func: this._streamtapeExtractor }, { key: 'lulustream', domains: ['luluvdo.com'],    func: this._lulustreamExtractor }, { key: 'uqload',     domains: ['uqload.cx'],      func: this._uqloadExtractor }, { key: 'filemoon',   domains: ['filemoon.sx'],    func: this._filemoonExtractor }, { key: 'mixdrop',    domains: ['mixdrop.ps'],     func: this._mixdropExtractor }, ];
     _formatQuality(prefix, url, qualitySuffix = "") { const showUrl = this.getPreference("show_video_url_in_quality"); let quality = `${prefix} ${qualitySuffix}`.trim(); if (showUrl) quality += ` - ${url}`; return quality; }
     async _parseM3U8(playlistUrl, prefix, headers = {}) { const videos = []; try { const playlistContent = (await this.client.get(playlistUrl, headers)).body; const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1); const lines = playlistContent.split('\n'); for (let i = 0; i < lines.length; i++) { if (lines[i].startsWith("#EXT-X-STREAM-INF")) { const resolution = lines[i].match(/RESOLUTION=(\d+x\d+)/)?.[1]; const quality = resolution ? resolution.split('x')[1] + "p" : "Unknown"; let videoUrl = lines[++i]; if (videoUrl && !videoUrl.startsWith('http')) videoUrl = baseUrl + videoUrl; if (videoUrl) videos.push({ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(prefix, videoUrl, quality), headers }); } } } catch(e) {} if (videos.length === 0) videos.push({ url: playlistUrl, originalUrl: playlistUrl, quality: this._formatQuality(prefix, playlistUrl, "Auto HLS"), headers }); return videos; }
-    async _vidtubeExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; script = "eval(function(p,a,c,k,e,d)" + script; const unpacked = unpackJs(script); const masterUrl = unpacked.match(/(https?:\/\/[^"]+\.m3u8[^"]*)/)?.[1]; if (!masterUrl) return []; return this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)); }
-    async _updownExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; script = "eval(function(p,a,c,k,e,d)" + script; const unpacked = unpackJs(script); const masterUrl = unpacked.match(/sources:\s*\[{file:"([^"]+)"/)?.[1]; return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
-    async _savefilesExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; script = "eval(function(p,a,c,k,e,d)" + script; const unpacked = unpackJs(script); const masterUrl = unpacked.match(/sources:\s*\[{src:"([^"]+)"/)?.[1]; return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
+    async _vidtubeExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; script = "eval(function(p,a,c,k,e,d)" + script; const unpacked = unpackJs(script); const masterUrl = unpacked.match(/sources:\s*\[{file:"([^"]+)"/)?.[1] || unpacked.match(/(https?:\/\/[^"]+\.m3u8[^"]*)/)?.[1]; if (!masterUrl) return []; return this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)); }
+    async _updownExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; script = "eval(function(p,a,c,k,e,d)" + script; const unpacked = unpackJs(script); const masterUrl = unpacked.match(/file:"([^"]+)"/)?.[1]; return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
+    async _savefilesExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const fileCode = res.body.match(/name="file_code" value="([^"]+)"/)?.[1]; if (!fileCode) return []; const postRes = await this.client.post(new URL(url).origin + "/dl", { headers: this._getVideoHeaders(url), body: `op=embed&file_code=${fileCode}` }); let script = postRes.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; script = "eval(function(p,a,c,k,e,d)" + script; const unpacked = unpackJs(script); const masterUrl = unpacked.match(/sources:\s*\[{src:"([^"]+)"/)?.[1]; return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
     async _streamwishExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; const unpacked = unpackJs("eval(function(p,a,c,k,e,d)" + script); const masterUrl = unpacked.match(/(https?:\/\/[^"]+\.m3u8[^"]*)/)?.[1]; return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
     async _filemoonExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; const unpacked = unpackJs("eval(function(p,a,c,k,e,d)" + script); const masterUrl = unpacked.match(/(https?:\/\/[^"]+\.m3u8[^"]*)/)?.[1]; return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
     async _lulustreamExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const masterUrl = res.body.substringAfter('file:"').substringBefore('"'); return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
@@ -176,17 +126,10 @@ class DefaultExtension extends MProvider {
     async _doodstreamExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const pass_md5_path = res.body.substringAfter("'/pass_md5/").substringBefore("'"); if (!pass_md5_path) return []; const pass_md5_url = new URL(url).origin + "/pass_md5/" + pass_md5_path; const doodtoken = Math.random().toString(36).substring(7); const video_url_res = await this.client.get(pass_md5_url, { headers: { "Referer": url } }); const video_url = video_url_res.body + "z" + doodtoken + "?token=" + doodtoken; return [{ url: video_url, quality: this._formatQuality(prefix, video_url, "Direct"), originalUrl: video_url, headers: this._getVideoHeaders(url) }]; }
     async _streamtapeExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const script = res.body.substringAfter("document.getElementById('robotlink')").substringBefore("</script>"); if (!script) return []; const finalUrl = "https:" + script.substringAfter("innerHTML = '").substringBefore("'") + script.substringAfter("+ ('xcd").substringBefore("'"); return [{ url: finalUrl, quality: this._formatQuality(prefix, finalUrl, "Direct"), originalUrl: finalUrl, headers: this._getVideoHeaders(url) }]; }
     async _uqloadExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const videoUrl = res.body.substringAfter('sources: ["').substringBefore('"]'); return videoUrl.startsWith("http") ? [{ url: videoUrl, quality: this._formatQuality(prefix, videoUrl, "Direct"), originalUrl: videoUrl, headers: this._getVideoHeaders("https://uqload.to/") }] : []; }
-    async _allinoneExtractor(url, prefix) { try { const res = await this.client.get(url, this._getVideoHeaders(url)); const body = res.body, doc = new Document(body), videoHeaders = this._getVideoHeaders(url); let sources = []; const directVideoSrc = doc.selectFirst("source[src]")?.getSrc || doc.selectFirst("video[src]")?.getSrc; if (directVideoSrc) sources.push(directVideoSrc); let potentialScripts = body; const packedScriptMatch = body.match(/eval\(function\(p,a,c,k,e,d\)\s?{.*}\)/); if (packedScriptMatch) try { potentialScripts += "\n" + unpackJs(packedScriptMatch[0]); } catch (e) {} const urlRegex = /(https?:\/\/[^"' \s]+\.(?:m3u8|mp4|webm|mkv|mov|flv|avi))[^"' \s]*/ig; let match; while ((match = urlRegex.exec(potentialScripts)) !== null) sources.push(match[0]); const uniqueSources = [...new Set(sources.filter(s => s && s.startsWith("http")))]; const allVideos = []; for (const sourceUrl of uniqueSources) { if (sourceUrl.includes(".m3u8")) allVideos.push(...await this._parseM3U8(sourceUrl, prefix, videoHeaders)); else allVideos.push({ url: sourceUrl, originalUrl: sourceUrl, quality: this._formatQuality(prefix, sourceUrl, "Direct"), headers: videoHeaders }); } return allVideos; } catch (e) { return []; } }
+    async _allinoneExtractor(url, prefix) { try { const res = await this.client.get(url, this._getVideoHeaders(url)); const body = res.body; const doc = new Document(body); const videoHeaders = this._getVideoHeaders(url); let sources = []; const directVideoSrc = doc.selectFirst("source[src]")?.getSrc || doc.selectFirst("video[src]")?.getSrc; if (directVideoSrc) { sources.push(directVideoSrc); } let potentialScripts = body; const packedScriptMatch = body.match(/eval\(function\(p,a,c,k,e,d\)\s?{.*}\)/); if (packedScriptMatch) { try { const unpacked = unpackJs(packedScriptMatch[0]); if (unpacked) potentialScripts += "\n" + unpacked; } catch (e) { } } const urlRegex = /(https?:\/\/[^"' \s]+\.(?:m3u8|mp4|webm|mkv|mov|flv|avi))[^"' \s]*/ig; let match; while ((match = urlRegex.exec(potentialScripts)) !== null) { sources.push(match[0]); } for (const scriptElement of doc.select("script")) { const scriptContent = scriptElement.text; if (!scriptContent.includes('{') || !scriptContent.includes('}')) continue; const jsonRegex = /[{,\[]\s*["']?(?:file|src|source|url)["']?\s*:\s*["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/ig; let jsonMatch; while((jsonMatch = jsonRegex.exec(scriptContent)) !== null) { sources.push(jsonMatch[1]); } } const iframe = doc.selectFirst("iframe[src]"); if (iframe) { const iframeSrc = iframe.getSrc; if (iframeSrc) { const iframeUrl = new URL(iframeSrc, url).href; if (new URL(iframeUrl).hostname !== new URL(url).hostname) { const iframeVideos = await this._allinoneExtractor(iframeUrl, `${prefix} (iFrame)`); if (iframeVideos.length > 0) return iframeVideos; } } } if (sources.length === 0) return []; const uniqueSources = [...new Set(sources.filter(s => s && s.startsWith("http")))]; const allVideos = []; for (const sourceUrl of uniqueSources) { if (sourceUrl.includes(".m3u8")) { allVideos.push(...await this._parseM3U8(sourceUrl, prefix, videoHeaders)); } else { allVideos.push({ url: sourceUrl, originalUrl: sourceUrl, quality: this._formatQuality(prefix, sourceUrl), headers: videoHeaders }); } } return allVideos; } catch (e) { return []; } }
 
     // --- FILTERS AND PREFERENCES ---
     getFilterList() { const categories = [{"name": "اختر", "query": ""}, {"name": "كل الافلام", "query": "/movies/"}, {"name": "افلام اجنبى", "query": "/category/افلام-اجنبي-3/"}, {"name": "افلام انمى", "query": "/category/افلام-انمي-1/"}, {"name": "افلام اسيويه", "query": "/category/افلام-اسيوي/"}, {"name": "افلام نتفليكس", "query": "/netflix-movies/"}, {"name": "سلاسل الافلام", "query": "/movies/"}, {"name": "الاعلي تقييما", "query": "/top-rating-imdb/"}, {"name": "مسلسلات اجنبى", "query": "/category/مسلسلات-اجنبي/"}, {"name": "مسلسلات اجنبى نتفليكس", "query": "/netflix-series/?cat=7"}, {"name": "مسلسلات اسيوية", "query": "/category/مسلسلات-اسيوية-7/"}, {"name": "مسلسلات اسيوية نتفليكس", "query": "/netflix-series/?cat=9"}, {"name": "مسلسلات انمي", "query": "/category/مسلسلات-انمي-1/"}, {"name": "مسلسلات انمي نتفلكس", "query": "/netflix-series/?cat=8"}, {"name": "احدث حلقات الانمي", "query": "/category/مسلسلات-انمي-1/?key=episodes"}]; return [{type_name: "SelectFilter", name: "الأقسام", state: 0, values: categories.map(c => ({type_name: "SelectOption", name: c.name, value: c.query}))}]; }
-    getSourcePreferences() { return [
-        { key: "preferred_quality", listPreference: { title: "الجودة المفضلة", summary: "اختر الجودة التي سيتم اختيارها تلقائيا", valueIndex: 1, entries: ["1080p", "720p", "480p"], entryValues: ["1080", "720", "480"], } },
-        { key: "link_fetch_mode", listPreference: { title: "طريقة جلب الروابط", summary: "اختر من أي صفحة تريد جلب الروابط", valueIndex: 0, entries: ["مشاهدة وتحميل معاً", "صفحة المشاهدة فقط", "صفحة التحميل فقط"], entryValues: ["both", "watch", "download"] } },
-        { key: "hoster_selection", multiSelectListPreference: { title: "اختر السيرفرات", summary: "اختر السيرفرات التي تريد ان تظهر", entries: ["Vidtube", "UpDown", "Savefiles", "Doodstream", "StreamWish / Filelions", "Streamtape", "Lulustream", "Uqload", "Filemoon", "Mixdrop", "Other Embeds"], entryValues: ["vidtube", "updown", "savefiles", "dood", "streamwish", "streamtape", "lulustream", "uqload", "filemoon", "mixdrop", "other"], values: ["vidtube", "updown", "streamwish", "dood"], } },
-        { key: "show_video_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط الفيديو (للتصحيح)", summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة", value: false, } },
-        { key: "show_embed_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط التضمين (للتصحيح)", summary: "عرض رابط التضمين الأولي بجانب اسم الجودة", value: false, } },
-        { key: "use_fallback_extractor", switchPreferenceCompat: { title: "استخدام مستخرج احتياطي (تجريبي)", summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام", value: false, } }
-    ]; }
+    getSourcePreferences() { return [ { key: "preferred_quality", listPreference: { title: "الجودة المفضلة", summary: "اختر الجودة التي سيتم اختيارها تلقائيا", valueIndex: 1, entries: ["1080p", "720p", "480p"], entryValues: ["1080", "720", "480"], } }, { key: "link_fetch_mode", listPreference: { title: "طريقة جلب الروابط", summary: "اختر من أي صفحة تريد جلب الروابط", valueIndex: 0, entries: ["مشاهدة وتحميل معاً", "صفحة المشاهدة فقط", "صفحة التحميل فقط"], entryValues: ["both", "watch", "download"] } }, { key: "hoster_selection", multiSelectListPreference: { title: "اختر السيرفرات", summary: "اختر السيرفرات التي تريد ان تظهر", entries: ["Vidtube", "UpDown", "Savefiles", "Doodstream", "StreamWish / Filelions", "Streamtape", "Lulustream", "Uqload", "Filemoon", "Mixdrop", "Other Embeds"], entryValues: ["vidtube", "updown", "savefiles", "dood", "streamwish", "streamtape", "lulustream", "uqload", "filemoon", "mixdrop", "other"], values: ["vidtube", "updown", "streamwish", "dood"], } }, { key: "show_video_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط الفيديو (للتصحيح)", summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة", value: false, } }, { key: "show_embed_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط التضمين (للتصحيح)", summary: "عرض رابط التضمين الأولي بجانب اسم الجودة", value: false, } }, { key: "use_fallback_extractor", switchPreferenceCompat: { title: "استخدام مستخرج احتياطي (تجريبي)", summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام", value: false, } } ]; }
 }
 function unpackJs(packedJS) { try { let p = packedJS; const oldMatch = p.match(/eval\(function\(p,a,c,k,e,d\){.*}\((.*)\)\)/); if (oldMatch) { let args = oldMatch[1].split(',').map(arg => arg.trim()); p = args[0].replace(/^'|'$/g, ''); let a = parseInt(args[1]); let c = parseInt(args[2]); let k = args[3].replace(/^'|'$/g, '').split('|'); while (c--) if (k[c]) p = p.replace(new RegExp('\\b' + c.toString(a) + '\\b', 'g'), k[c]); return p; } } catch (e) {} return packedJS; }
