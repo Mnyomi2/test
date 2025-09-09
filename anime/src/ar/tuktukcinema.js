@@ -28,7 +28,7 @@ class DefaultExtension extends MProvider {
         return {
             "Referer": this.getBaseUrl() + "/",
             "Origin": this.getBaseUrl(),
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20101001 Firefox/138.0"
         };
     }
     _getVideoHeaders(refererUrl) {
@@ -286,19 +286,29 @@ class DefaultExtension extends MProvider {
 
     async _doodstreamExtractor(url, prefix) {
         try {
-            const embedId = url.match(/(?:\/d\/|\/e\/)([0-9a-zA-Z]+)/)?.[1];
-            if (!embedId) return [];
-            const embedUrl = `https://${new URL(url).hostname}/e/${embedId}`;
-            const res = await this.client.get(embedUrl, this._getVideoHeaders(url));
-            const passMd5Path = res.body.substringAfter("'/pass_md5/").substringBefore("'");
-            if (!passMd5Path) return [];
-            const passMd5Url = new URL(embedUrl).origin + "/pass_md5/" + passMd5Path;
-            const doodToken = Math.random().toString(36).substring(7);
-            const videoUrlRes = await this.client.get(passMd5Url, { headers: { "Referer": embedUrl } });
-            const videoUrl = videoUrlRes.body + "z" + doodToken + "?token=" + doodToken;
-            return [{ url: videoUrl, originalUrl: embedUrl, quality: this._formatQuality(prefix, videoUrl), headers: this._getVideoHeaders(embedUrl) }];
-        } catch (error) {
-            console.error(`Error resolving DoodStream (${url}):`, error);
+            const videoId = url.split('/').pop();
+            if (!videoId) return [];
+
+            const downloadPageUrl = `https://d-s.io/d/${videoId}`;
+            const res1 = await this.client.get(downloadPageUrl, this._getVideoHeaders(url));
+            const doc1 = new Document(res1.body);
+            const secondLinkPath = doc1.selectFirst(".download-content a[href*='/download/']")?.attr("href");
+            if (!secondLinkPath) return [];
+
+            const secondUrl = `https://d-s.io${secondLinkPath}`;
+            const res2 = await this.client.get(secondUrl, this._getVideoHeaders(downloadPageUrl));
+            const doc2 = new Document(res2.body);
+            const finalVideoUrl = doc2.selectFirst(".download-generated a.btn")?.attr("href");
+            if (!finalVideoUrl) return [];
+
+            return [{
+                url: finalVideoUrl,
+                quality: this._formatQuality(prefix, finalVideoUrl),
+                originalUrl: finalVideoUrl,
+                headers: this._getVideoHeaders(url)
+            }];
+        } catch (e) {
+            console.error(`Error resolving DoodStream (${url}):`, e);
             return [];
         }
     }
