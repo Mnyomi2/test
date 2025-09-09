@@ -255,7 +255,7 @@ class DefaultExtension extends MProvider {
             const doc = await this.requestDoc(downloadPageUrl.replace(this.getBaseUrl(), ''));
             const proServerLink = doc.selectFirst("div.proServer a.downloadsLink");
             if (proServerLink) {
-                const serverName = proServerLink.selectFirst(".text span")?.text.trim();
+                const serverName = proServerLink.selectFirst(".text p")?.text.trim();
                 await this._processLink(videos, proServerLink.getHref, `[DL] ${serverName}`);
             }
             for (const block of doc.select("div.DownloadBlock")) {
