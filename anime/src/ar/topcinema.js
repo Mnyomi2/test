@@ -45,34 +45,7 @@ class DefaultExtension extends MProvider {
     }
 
     // --- LINK GATHERING ---
-    async _getWatchLinks(url) {
-        const videos = [];
-        const watchUrl = url.endsWith('/watch/') ? url : (url.endsWith('/') ? `${url}watch/` : `${url}/watch/`);
-        try {
-            const doc = await this.requestDoc(watchUrl.replace(this.getBaseUrl(), ''));
-            const initialIframeSrc = doc.selectFirst("div.player--iframe iframe")?.getSrc;
-            const initialServerName = doc.selectFirst("li.server--item.active span")?.text.trim() || "Default Server";
-            await this._processLink(videos, initialIframeSrc, initialServerName);
-            for (const serverEl of doc.select("li.server--item")) {
-                let serverName = serverEl.selectFirst("span")?.text.trim();
-                try {
-                    const dataId = serverEl.attr("data-id"), dataServer = serverEl.attr("data-server");
-                    if (!dataId || !dataServer) continue;
-                    const ajaxHeaders = {
-                        "Accept": "*/*", "Accept-Language": "en-US,en;q=0.5",
-                        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-                        "X-Requested-With": "XMLHttpRequest", "Origin": this.getBaseUrl(), "Referer": watchUrl,
-                        "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin",
-                    };
-                    const ajaxUrl = `${this.getBaseUrl()}/wp-content/themes/movies2023/Ajaxat/Single/Server.php`;
-                    const res = await this.client.post(ajaxUrl, { headers: ajaxHeaders, body: `id=${dataId}&i=${dataServer}` });
-                    const iframeSrc = new Document(res.body).selectFirst("iframe")?.getSrc;
-                    await this._processLink(videos, iframeSrc, serverName);
-                } catch (e) { if (this.getPreference("show_embed_url_in_quality")) { videos.push({ url: "", originalUrl: serverName, quality: `[Debug AJAX Error] ${serverName}` }); } }
-            }
-        } catch (e) {}
-        return videos;
-    }
+    async _getWatchLinks(url) { const videos = []; const watchUrl = url.endsWith('/watch/') ? url : (url.endsWith('/') ? `${url}watch/` : `${url}/watch/`); try { const doc = await this.requestDoc(watchUrl.replace(this.getBaseUrl(), '')); const initialIframeSrc = doc.selectFirst("div.player--iframe iframe")?.getSrc; const initialServerName = doc.selectFirst("li.server--item.active span")?.text.trim() || "Default Server"; await this._processLink(videos, initialIframeSrc, initialServerName); for (const serverEl of doc.select("li.server--item")) { let serverName = serverEl.selectFirst("span")?.text.trim(); try { const dataId = serverEl.attr("data-id"), dataServer = serverEl.attr("data-server"); if (!dataId || !dataServer) continue; const ajaxHeaders = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.5", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-Requested-With": "XMLHttpRequest", "Origin": this.getBaseUrl(), "Connection": "keep-alive", "Referer": watchUrl, "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin", "TE": "trailers", }; const ajaxUrl = `${this.getBaseUrl()}/wp-content/themes/movies2023/Ajaxat/Single/Server.php`; const res = await this.client.post(ajaxUrl, { headers: ajaxHeaders, body: `id=${dataId}&i=${dataServer}` }); const iframeSrc = new Document(res.body).selectFirst("iframe")?.getSrc; await this._processLink(videos, iframeSrc, serverName); } catch (e) { if (this.getPreference("show_embed_url_in_quality")) { videos.push({ url: "", originalUrl: serverName, quality: `[Debug AJAX Error] ${serverName}` }); } } } } catch (e) {} return videos; }
     async _getDownloadLinks(url) { const videos = []; const downloadPageUrl = url.replace(/\/watch\/?$/, '') + (url.endsWith('/') ? 'download/' : '/download/'); try { const doc = await this.requestDoc(downloadPageUrl.replace(this.getBaseUrl(), '')); const proServerLink = doc.selectFirst("div.proServer a.downloadsLink"); if(proServerLink) { const serverName = proServerLink.selectFirst(".text span")?.text.trim(); await this._processLink(videos, proServerLink.getHref, `[DL] ${serverName}`); } for (const block of doc.select("div.DownloadBlock")) { const qualityLabel = block.selectFirst("h2.download-title span")?.text.trim(); for (const linkEl of block.select("a.downloadsLink")) { const serverName = linkEl.selectFirst(".text span")?.text.trim(); const prefix = `[DL] ${serverName}` + (qualityLabel ? ` - ${qualityLabel}` : ''); await this._processLink(videos, linkEl.getHref, prefix); } } } catch(e) {} return videos; }
     
     // --- UNIVERSAL LINK PROCESSING LOGIC ---
@@ -82,9 +55,13 @@ class DefaultExtension extends MProvider {
     extractorMap = [ { key: 'vidtube',    domains: ['vidtube.pro'],  func: this._vidtubeExtractor }, { key: 'updown',     domains: ['updown.cam'],   func: this._updownExtractor }, { key: 'savefiles',  domains: ['savefiles.com'],func: this._savefilesExtractor }, { key: 'dood',       domains: ['d0o0d.com', 'dood.yt'],  func: this._doodstreamExtractor }, { key: 'streamwish', domains: ['streamwish.fun', 'vidhide.fun', 'filelions.to'], func: this._streamwishExtractor }, { key: 'streamtape', domains: ['streamtape.cc'],  func: this._streamtapeExtractor }, { key: 'lulustream', domains: ['luluvdo.com'],    func: this._lulustreamExtractor }, { key: 'uqload',     domains: ['uqload.cx'],      func: this._uqloadExtractor }, { key: 'filemoon',   domains: ['filemoon.sx'],    func: this._filemoonExtractor }, { key: 'mixdrop',    domains: ['mixdrop.ps'],     func: this._mixdropExtractor }, ];
     _formatQuality(prefix, url, qualitySuffix = "") { const showUrl = this.getPreference("show_video_url_in_quality"); let quality = `${prefix} ${qualitySuffix}`.trim(); if (showUrl) quality += ` - ${url}`; return quality; }
     async _parseM3U8(playlistUrl, prefix, headers = {}) { const videos = []; try { const playlistContent = (await this.client.get(playlistUrl, headers)).body; const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1); const lines = playlistContent.split('\n'); for (let i = 0; i < lines.length; i++) { if (lines[i].startsWith("#EXT-X-STREAM-INF")) { const resolution = lines[i].match(/RESOLUTION=(\d+x\d+)/)?.[1]; const quality = resolution ? resolution.split('x')[1] + "p" : "Unknown"; let videoUrl = lines[++i]; if (videoUrl && !videoUrl.startsWith('http')) videoUrl = baseUrl + videoUrl; if (videoUrl) videos.push({ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(prefix, videoUrl, quality), headers }); } } } catch(e) {} if (videos.length === 0) videos.push({ url: playlistUrl, originalUrl: playlistUrl, quality: this._formatQuality(prefix, playlistUrl, "Auto HLS"), headers }); return videos; }
+    
+    // --- REWRITTEN/FIXED EXTRACTORS ---
     async _vidtubeExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; script = "eval(function(p,a,c,k,e,d)" + script; const unpacked = unpackJs(script); const sourcesRegex = /{file:"([^"]+)",label:"([^"]+)"}/g; let match; const videos = []; while ((match = sourcesRegex.exec(unpacked)) !== null) { videos.push({ url: match[1], originalUrl: match[1], quality: this._formatQuality(prefix, match[1], match[2]), headers: this._getVideoHeaders(url) }); } return videos; }
     async _updownExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); let script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; script = "eval(function(p,a,c,k,e,d)" + script; const unpacked = unpackJs(script); const videoUrl = unpacked.match(/file:"([^"]+)"/)?.[1]; if (videoUrl) { return [{ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(prefix, videoUrl, "Direct"), headers: this._getVideoHeaders(url) }]; } return []; }
     async _savefilesExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const fileCode = res.body.match(/name="file_code" value="([^"]+)"/)?.[1]; if (!fileCode) return []; const postRes = await this.client.post(new URL(url).origin + "/dl", { headers: this._getVideoHeaders(url), body: `op=embed&file_code=${fileCode}` }); let script = postRes.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; script = "eval(function(p,a,c,k,e,d)" + script; const unpacked = unpackJs(script); const masterUrl = unpacked.match(/sources:\s*\[{src:"([^"]+)"/)?.[1]; return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
+    
+    // --- OTHER EXTRACTORS ---
     async _streamwishExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; const unpacked = unpackJs("eval(function(p,a,c,k,e,d)" + script); const masterUrl = unpacked.match(/(https?:\/\/[^"]+\.m3u8[^"]*)/)?.[1]; return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
     async _filemoonExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; const unpacked = unpackJs("eval(function(p,a,c,k,e,d)" + script); const masterUrl = unpacked.match(/(https?:\/\/[^"]+\.m3u8[^"]*)/)?.[1]; return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
     async _lulustreamExtractor(url, prefix) { const res = await this.client.get(url, this.getHeaders(url)); const masterUrl = res.body.substringAfter('file:"').substringBefore('"'); return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; }
@@ -99,16 +76,39 @@ class DefaultExtension extends MProvider {
     getSourcePreferences() { return [ { key: "preferred_quality", listPreference: { title: "الجودة المفضلة", summary: "اختر الجودة التي سيتم اختيارها تلقائيا", valueIndex: 1, entries: ["1080p", "720p", "480p"], entryValues: ["1080", "720", "480"], } }, { key: "link_fetch_mode", listPreference: { title: "طريقة جلب الروابط", summary: "اختر من أي صفحة تريد جلب الروابط", valueIndex: 0, entries: ["مشاهدة وتحميل معاً", "صفحة المشاهدة فقط", "صفحة التحميل فقط"], entryValues: ["both", "watch", "download"] } }, { key: "hoster_selection", multiSelectListPreference: { title: "اختر السيرفرات", summary: "اختر السيرفرات التي تريد ان تظهر", entries: ["Vidtube", "UpDown", "Savefiles", "Doodstream", "StreamWish / Filelions", "Streamtape", "Lulustream", "Uqload", "Filemoon", "Mixdrop", "Other Embeds"], entryValues: ["vidtube", "updown", "savefiles", "dood", "streamwish", "streamtape", "lulustream", "uqload", "filemoon", "mixdrop", "other"], values: ["vidtube", "updown", "streamwish", "dood"], } }, { key: "show_video_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط الفيديو (للتصحيح)", summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة", value: false, } }, { key: "show_embed_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط التضمين (للتصحيح)", summary: "عرض رابط التضمين الأولي بجانب اسم الجودة", value: false, } }, { key: "use_fallback_extractor", switchPreferenceCompat: { title: "استخدام مستخرج احتياطي (تجريبي)", summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام", value: false, } } ]; }
 }
 
+// A more robust unpacker based on your console script's logic
 function unpackJs(packedJS) {
-    function unq(s) { s = s || ""; if ((s[0] === '"' || s[0] === "'") && s[s.length - 1] === s[0]) { s = s.slice(1, -1); } s = s.replace(/\\x([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\u([0-9A-Fa-f]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\\\/g, '\\').replace(/\\\//g, '/').replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\'/g, "'"); return s; }
-    function itob(n, b) { if (n === 0) return "0"; var d = "0123456789abcdefghijklmnopqrstuvwxyz", o = ""; while (n) { o = d[n % b] + o; n = Math.floor(n / b); } return o; }
+    function unq(s) {
+        s = s || "";
+        if ((s[0] === '"' || s[0] === "'") && s[s.length - 1] === s[0]) {
+            s = s.slice(1, -1);
+        }
+        s = s.replace(/\\x([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)))
+             .replace(/\\u([0-9A-Fa-f]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16)))
+             .replace(/\\\\/g, '\\').replace(/\\\//g, '/').replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\'/g, "'");
+        return s;
+    }
+    function itob(n, b) {
+        if (n === 0) return "0";
+        var d = "0123456789abcdefghijklmnopqrstuvwxyz", o = "";
+        while (n) { o = d[n % b] + o; n = Math.floor(n / b); }
+        return o;
+    }
     try {
         const re = /eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)\s*\{[\s\S]*?\}\s*\(\s*(['"])([\s\S]*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])([\s\S]*?)\5\.split\(['"]\|['"]\)/i;
         let match = packedJS.match(re);
-        if (!match) { const oldMatch = packedJS.match(/eval\(function\(p,a,c,k,e,d\){.*}\((.*)\)\)/); if (oldMatch) { let args = oldMatch[1].split(',').map(arg => arg.trim()); let p = args[0].replace(/^'|'$/g, ''); let a = parseInt(args[1]); let c = parseInt(args[2]); let k = args[3].replace(/^'|'$/g, '').split('|'); while (c--) if (k[c]) p = p.replace(new RegExp('\\b' + c.toString(a) + '\\b', 'g'), k[c]); return p; } return packedJS; }
-        let p = unq(match[1] + match[2] + match[1]), a = +match[3], c = +match[4], k = unq("'" + match[6] + "'").split("|");
+        if (!match) return packedJS;
+        let p = unq(match[1] + match[2] + match[1]),
+            a = +match[3],
+            c = +match[4],
+            k = unq("'" + match[6] + "'").split("|");
         if (k.length < c) { for (var i = k.length; i < c; i++) k[i] = ""; }
-        for (i = c - 1; i >= 0; i--) { let t = itob(i, a), r = k[i] || t; p = p.replace(new RegExp('\\b' + t + '\\b', 'g'), r); }
+        for (i = c - 1; i >= 0; i--) {
+            let t = itob(i, a), r = k[i] || t;
+            p = p.replace(new RegExp('\\b' + t + '\\b', 'g'), r);
+        }
         return p;
-    } catch (e) { return packedJS; }
+    } catch (e) {
+        return packedJS;
+    }
 }
