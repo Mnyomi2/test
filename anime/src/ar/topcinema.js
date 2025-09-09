@@ -10,19 +10,6 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
-
-const mangayomiSources = [{
-    "name": "Topcinema",
-    "id": 645835682,
-    "baseUrl": "https://web6.topcinema.cam",
-    "lang": "ar",
-    "typeSource": "single",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://web6.topcinema.cam",
-    "itemType": 1,
-    "version": "3.4.0", // Definitive AJAX and Debugging Fix
-    "pkgPath": "anime/src/ar/topcinema.js",
-}];
-
 class DefaultExtension extends MProvider {
     constructor() {
         super();
