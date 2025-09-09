@@ -39,7 +39,7 @@ class DefaultExtension extends MProvider {
         if (fetchMode === "watch" || fetchMode === "both") { allStreams.push(...await this._getWatchLinks(url)); }
         if (fetchMode === "download" || fetchMode === "both") { allStreams.push(...await this._getDownloadLinks(url)); }
         const uniqueStreams = Array.from(new Map(allStreams.map(item => [item.originalUrl, item])).values());
-        const preferredQuality = this.getPreference("preferred_quality") || "720";
+        const preferredQuality = this.getPreference("preferred_quality") || "1080";
         uniqueStreams.sort((a, b) => { const qualityA = parseInt(a.quality.match(/(\d+)p/)?.[1] || 0), qualityB = parseInt(b.quality.match(/(\d+)p/)?.[1] || 0); return (qualityB + (b.quality.includes(preferredQuality) ? 10000 : 0)) - (qualityA + (a.quality.includes(preferredQuality) ? 10000 : 0)); });
         return uniqueStreams;
     }
