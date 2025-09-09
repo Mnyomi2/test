@@ -78,12 +78,10 @@ class DefaultExtension extends MProvider {
         items.forEach(item => {
             const linkElement = item.selectFirst("a");
             if (!linkElement) return;
-
             const name = this._titleEdit(linkElement.attr("title"));
             let imageUrlAttr = isSearch ? "src" : "data-src";
             const imageUrl = item.selectFirst("img")?.attr(imageUrlAttr);
             const link = linkElement.getHref;
-
             list.push({ name, imageUrl, link });
         });
         const hasNextPage = !!doc.selectFirst("div.pagination ul.page-numbers li a.next");
@@ -123,10 +121,8 @@ class DefaultExtension extends MProvider {
         const imageUrl = doc.selectFirst("div.left div.image img")?.getSrc;
         const description = doc.selectFirst("div.story")?.text.trim();
         const genre = doc.select("div.catssection li a").map(e => e.text);
-        
         const chapters = [];
         const episodeElements = doc.select("section.allepcont div.row a");
-
         if (episodeElements.length > 0) {
             const sortedEpisodes = [...episodeElements].sort((a, b) => {
                 const numA = parseInt(a.selectFirst("div.epnum")?.text.replace(/\D/g, '').trim() || '0');
@@ -146,14 +142,12 @@ class DefaultExtension extends MProvider {
     async getVideoList(url) {
         const allStreams = [];
         const fetchMode = this.getPreference("link_fetch_mode") || "both";
-
         if (fetchMode === "watch" || fetchMode === "both") {
             allStreams.push(...await this._getWatchLinks(url));
         }
         if (fetchMode === "download" || fetchMode === "both") {
             allStreams.push(...await this._getDownloadLinks(url));
         }
-
         const uniqueStreams = Array.from(new Map(allStreams.map(item => [item.url, item])).values());
         const preferredQuality = this.getPreference("preferred_quality") || "720";
         uniqueStreams.sort((a, b) => {
@@ -163,7 +157,6 @@ class DefaultExtension extends MProvider {
             if (!aPreferred && bPreferred) return 1;
             return 0;
         });
-        
         return uniqueStreams;
     }
 
@@ -199,28 +192,17 @@ class DefaultExtension extends MProvider {
         try {
             let foundVideos = false;
             const extractor = this.extractorMap.find(ext => hosterSelection.includes(ext.key) && ext.domains.some(d => url.includes(d)));
-            
             if (extractor) {
                 const extracted = await extractor.func.call(this, url, prefix);
-                if (extracted.length > 0) {
-                    videoList.push(...extracted);
-                    foundVideos = true;
-                }
+                if (extracted.length > 0) { videoList.push(...extracted); foundVideos = true; }
             }
-
             if (!foundVideos && this.getPreference("use_fallback_extractor")) {
                 const fallbackVideos = await this._allinoneExtractor(url, `[Fallback] ${prefix}`);
-                if (fallbackVideos.length > 0) {
-                    videoList.push(...fallbackVideos);
-                    foundVideos = true;
-                }
+                if (fallbackVideos.length > 0) { videoList.push(...fallbackVideos); foundVideos = true; }
             }
-
             if (!foundVideos && hosterSelection.includes('other') && !prefix.startsWith('[DL]')) {
                 let quality = `[Embed] ${prefix}`;
-                if (this.getPreference("show_embed_url_in_quality")) {
-                    quality += ` [${url}]`;
-                }
+                if (this.getPreference("show_embed_url_in_quality")) { quality += ` [${url}]`; }
                 videoList.push({ url: url, originalUrl: url, quality: quality });
             }
         } catch (e) {
@@ -239,34 +221,49 @@ class DefaultExtension extends MProvider {
     
     _formatQuality(prefix, url, qualitySuffix = "") {
         let quality = `${prefix} ${qualitySuffix}`.trim();
-        if (this.getPreference("show_video_url_in_quality")) {
-            quality += ` - ${url}`;
-        }
+        if (this.getPreference("show_video_url_in_quality")) { quality += ` - ${url}`; }
         return quality;
     }
 
     async _parseM3U8(playlistUrl, prefix, headers = {}) {
-        const videos = [];
-        try {
-            const m3u8Content = (await this.client.get(playlistUrl, { headers })).body;
-            const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
-            const lines = m3u8Content.split('\n');
-            for (let i = 0; i < lines.length; i++) {
-                if (lines[i].startsWith("#EXT-X-STREAM-INF")) {
-                    const resolution = lines[i].match(/RESOLUTION=(\d+x\d+)/)?.[1];
-                    const quality = resolution ? resolution.split('x')[1] + "p" : "Auto";
-                    let videoUrl = lines[++i];
-                    if (videoUrl && !videoUrl.startsWith('http')) { videoUrl = baseUrl + videoUrl; }
-                    if (videoUrl) {
-                        videos.push({ url: videoUrl, originalUrl: playlistUrl, quality: this._formatQuality(prefix, videoUrl, quality), headers });
-                    }
-                }
-            }
-        } catch (e) { console.error("M3U8 Parse Error:", e); }
-        if (videos.length === 0) {
-            videos.push({ url: playlistUrl, originalUrl: playlistUrl, quality: this._formatQuality(prefix, playlistUrl, "Auto HLS"), headers });
+        const fallback = [{ url: playlistUrl, originalUrl: playlistUrl, quality: this._formatQuality(prefix, playlistUrl, "Auto HLS"), headers }];
+        
+        if (!this.getPreference("extract_m3u8_qualities", true)) {
+            return fallback;
         }
-        return videos;
+
+        try {
+            const masterPlaylistContent = (await this.client.get(playlistUrl, { headers })).body;
+            const regex = /#EXT-X-STREAM-INF:.*(?:RESOLUTION=(\d+x\d+)|BANDWIDTH=(\d+)).*\n(?!#)(.+)/g;
+            let match;
+            const parsedQualities = [];
+            const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
+
+            while ((match = regex.exec(masterPlaylistContent)) !== null) {
+                const resolution = match[1];
+                const bandwidth = match[2];
+                let qualityName = resolution ? resolution.split('x')[1] + 'p' : `${Math.round(parseInt(bandwidth) / 1000)}kbps`;
+                let streamUrl = match[3].trim();
+                if (!streamUrl.startsWith('http')) {
+                    streamUrl = baseUrl + streamUrl;
+                }
+                parsedQualities.push({
+                    url: streamUrl,
+                    originalUrl: playlistUrl, // Referer should be the master playlist
+                    quality: this._formatQuality(prefix, streamUrl, qualityName),
+                    headers
+                });
+            }
+            if (parsedQualities.length > 0) {
+                const finalVideos = [{ ...fallback[0] }]; // Start with the Auto option
+                finalVideos.push(...parsedQualities);
+                return finalVideos;
+            }
+            return fallback;
+        } catch (e) {
+            console.error("M3U8 Quality Parse Error:", e);
+            return fallback;
+        }
     }
 
     async _cybervynxExtractor(url, prefix) {
@@ -288,19 +285,16 @@ class DefaultExtension extends MProvider {
         try {
             const videoId = url.split('/').pop();
             if (!videoId) return [];
-
             const downloadPageUrl = `https://d-s.io/d/${videoId}`;
             const res1 = await this.client.get(downloadPageUrl, this._getVideoHeaders(url));
             const doc1 = new Document(res1.body);
             const secondLinkPath = doc1.selectFirst(".download-content a[href*='/download/']")?.attr("href");
             if (!secondLinkPath) return [];
-
             const secondUrl = `https://d-s.io${secondLinkPath}`;
             const res2 = await this.client.get(secondUrl, this._getVideoHeaders(downloadPageUrl));
             const doc2 = new Document(res2.body);
             const finalVideoUrl = doc2.selectFirst(".download-generated a.btn")?.attr("href");
             if (!finalVideoUrl) return [];
-
             return [{
                 url: finalVideoUrl,
                 quality: this._formatQuality(prefix, finalVideoUrl),
@@ -360,9 +354,7 @@ class DefaultExtension extends MProvider {
                 }
             }
             return allVideos;
-        } catch (e) {
-            return [];
-        }
+        } catch (e) { return []; }
     }
 
     // --- FILTERS AND PREFERENCES ---
@@ -391,6 +383,13 @@ class DefaultExtension extends MProvider {
                 entries: ["Cybervynx/Smoothpre", "Doodstream", "Mixdrop", "Other Embeds"],
                 entryValues: ["cybervynx", "dood", "mixdrop", "other"],
                 values: ["cybervynx", "dood", "mixdrop"],
+            }
+        }, {
+            key: "extract_m3u8_qualities",
+            switchPreferenceCompat: {
+                title: "استخراج الجودات من روابط M3U8",
+                summary: "عندما يوفر السيرفر جودات متعددة، سيتم عرضها كلها. قم بتعطيل هذا الخيار لرؤية رابط 'تلقائي' واحد فقط.",
+                value: true,
             }
         }, {
             key: "show_video_url_in_quality",
