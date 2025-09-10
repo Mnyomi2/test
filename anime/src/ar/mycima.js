@@ -2,10 +2,11 @@ const mangayomiSources = [{
     "name": "MY Cima",
     "id": 1039485720,
     "lang": "ar",
-    "baseUrl": "https://wecima.show",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=wecima.show",
+    "baseUrl": "https://wecima.video",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=wecima.video",
     "typeSource": "single",
     "itemType": 1,
+    "hasCloudflare": true,
     "version": "1.0.0",
     "pkgPath": "anime/src/ar/mycima.js"
 }];
@@ -53,7 +54,7 @@ class DefaultExtension extends MProvider {
     // --- Catalogue Methods ---
 
     async getPopular(page) {
-        const url = `${this.source.baseUrl}/seriestv/top/?page_number=${page}`;
+        const url = `${this.source.baseUrl}/movies/?page_no=${page}`;
         const res = await this.client.get(url, this.getHeaders());
         const doc = new Document(res.body);
         return this.parseCatalogue(doc);
@@ -93,18 +94,23 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(this.source.baseUrl + url, this.getHeaders());
         const doc = new Document(res.body);
         
-        let name = doc.selectFirst("li:contains(المسلسل) p")?.text ??
-                   doc.selectFirst("singlerelated.hasdivider:contains(سلسلة) a")?.text ??
-                   doc.selectFirst("div.Title--Content--Single-begin > h1")?.text
-                       .split(" (")[0].replace("مشاهدة فيلم ", "").split("مترجم")[0];
+        const name = doc.selectFirst("div.Title--Content--Single-begin > h1")?.text
+                       .split(" (")[0]
+                       .replace(/مشاهدة (فيلم|مسلسل|انمي|برنامج) /, "")
+                       .split("مترجم")[0].trim();
 
-        const genre = doc.select("li:contains(التصنيف) > p > a, li:contains(النوع) > p > a").map(e => e.text).join(", ");
+        const genre = doc.select("ul.Terms--Content--Single-begin li:contains(النوع) p a").map(e => e.text).join(", ");
         let description = doc.selectFirst("div.AsideContext > div.StoryMovieContent")?.text ?? "";
         const author = doc.select("li:contains(شركات الإنتاج) > p > a").map(e => e.text).join(", ");
         
-        const altName = doc.selectFirst("li:contains( بالعربي) > p, li:contains(معروف) > p")?.text;
-        if (altName) {
-            description += `\n\nAlternative Name: ${altName}`;
+        const altNameArabic = doc.selectFirst("ul.Terms--Content--Single-begin li:contains(الإسم بالعربي) p")?.text;
+        if (altNameArabic) {
+            description += `\n\nالإسم بالعربي: ${altNameArabic}`;
+        }
+        
+        const altNameKnownAs = doc.selectFirst("ul.Terms--Content--Single-begin li:contains(معروف ايضاََ بـ) p")?.text;
+        if (altNameKnownAs) {
+            description += `\n\nمعروف ايضاََ بـ: ${altNameKnownAs}`;
         }
 
         // --- Episodes Parsing ---
