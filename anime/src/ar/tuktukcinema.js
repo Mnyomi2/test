@@ -55,43 +55,39 @@ class DefaultExtension extends MProvider {
     // --- UNIVERSAL LINK PROCESSING ---
     async _processLink(videoList, url, prefix) {
         if (!url) return;
-        
         const hosterSelection = this.getPreference("hoster_selection") || [];
         let foundVideos = false;
-        
-        // 1. Try to find a direct, optimized extractor from the user's selection
-        const primaryExtractor = this.extractorMap.find(ext => hosterSelection.includes(ext.key) && ext.domains.some(d => url.includes(d)));
-        if (primaryExtractor) {
-            try {
-                const extracted = await primaryExtractor.func.call(this, url, prefix);
-                if (extracted && extracted.length > 0) {
-                    videoList.push(...extracted);
-                    foundVideos = true;
-                }
-            } catch (e) { /* Primary extractor failed */ }
+
+        // Step 1: Try the specific, user-selected extractor first (fastest path)
+        const extractor = this.extractorMap.find(ext => hosterSelection.includes(ext.key) && ext.domains.some(d => url.includes(d)));
+        if (extractor) {
+            const extracted = await extractor.func.call(this, url, prefix);
+            if (extracted.length > 0) {
+                videoList.push(...extracted);
+                foundVideos = true;
+            }
         }
 
-        // 2. Decide if we should run the master fallback extractor
-        let runFallback = false;
-        // Condition A: The primary extractor was tried but failed, AND the user enabled the generic fallback setting.
-        if (primaryExtractor && !foundVideos && this.getPreference("use_fallback_extractor")) {
-            runFallback = true;
-        }
-        // Condition B: No primary extractor was found (it's an "Other Embed"), AND the user has "Other Embeds" selected.
-        if (!primaryExtractor && hosterSelection.includes('other')) {
-            runFallback = true;
+        // Step 2: If it's an "Other Embed", try to brute-force it with all specific extractors
+        if (!foundVideos && hosterSelection.includes('other') && !prefix.startsWith('[DL]')) {
+            const resolvedVideos = await this._tryAllExtractors(url, `[Other] ${prefix}`);
+            if (resolvedVideos.length > 0) {
+                videoList.push(...resolvedVideos);
+                foundVideos = true;
+            }
         }
 
-        if (runFallback) {
+        // Step 3: Use the powerful generic fallback extractor if nothing has worked so far
+        if (!foundVideos && this.getPreference("use_fallback_extractor")) {
             const fallbackVideos = await this._allinoneExtractor(url, `[Fallback] ${prefix}`);
-            if (fallbackVideos && fallbackVideos.length > 0) {
+            if (fallbackVideos.length > 0) {
                 videoList.push(...fallbackVideos);
                 foundVideos = true;
             }
         }
 
-        // 3. If it was an "Other Embed" and EVERYTHING failed, push the raw link as a last resort.
-        if (!foundVideos && !primaryExtractor && hosterSelection.includes('other')) {
+        // Step 4: If STILL nothing, and it was an "Other Embed", add the raw link as a last resort.
+        if (!foundVideos && hosterSelection.includes('other') && !prefix.startsWith('[DL]')) {
             let quality = `[Embed] ${prefix}`;
             if (this.getPreference("show_embed_url_in_quality")) {
                 quality += ` [${url}]`;
@@ -130,31 +126,44 @@ class DefaultExtension extends MProvider {
     async _thetubeExtractor(url, prefix) { try { let embedUrl = url.includes("/e/") ? url.replace("/e/", "/embed-") + ".html" : url; const res = await this.client.get(embedUrl, this.getHeaders(embedUrl)); const script = res.body.substringAfter("eval(function(p,a,c,k,e,d)").substringBefore("</script>"); if (!script) return []; const fullScript = "eval(function(p,a,c,k,e,d)" + script; const unpacked = unpackJs(fullScript); const masterUrl = unpacked.match(/file:\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/)?.[1]; return masterUrl ? this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(embedUrl)) : []; } catch (e) { return []; } }
     async _bigwarpExtractor(url, prefix) { try { const res = await this.client.get(url, this._getVideoHeaders(url)); const jwplayerSetup = res.body.substringAfter('jwplayer("vplayer").setup({').substringBefore('});'); if (!jwplayerSetup) return []; const videos = []; const sourceRegex = /{file:"([^"]+)",label:"([^"]+)"}/g; const matches = [...jwplayerSetup.matchAll(sourceRegex)]; for (const match of matches) { const videoUrl = match[1]; const qualityLabel = match[2]; const resolution = qualityLabel.split(' ')[0]; videos.push({ url: videoUrl, originalUrl: videoUrl, quality: this._formatQuality(`${prefix} - ${resolution}`, videoUrl), headers: this._getVideoHeaders(url) }); } return videos; } catch (e) { return []; } }
 
-    // --- MASTER FALLBACK EXTRACTOR ---
-    async _allinoneExtractor(url, prefix) {
-        // Stage 1: Try the specific extractor for the given URL's domain first.
-        const specificExtractor = this.extractorMap.find(ext => ext.domains.some(d => url.includes(d)));
-        if (specificExtractor) {
+    /**
+     * Tries to resolve a URL by running it through all available specific extractors.
+     * This is used for "Other Embeds" to find a working extractor.
+     */
+    async _tryAllExtractors(url, prefix) {
+        const allExtractorMethods = [ this._cybervynxExtractor, this._doodstreamExtractor, this._mixdropExtractor, this._vidguardExtractor, this._mp4uploadExtractor, this._voeExtractor, this._okruExtractor, this._vidmolyExtractor, this._uqloadExtractor, this._vkExtractor, this._videaExtractor, this._dailymotionExtractor, this._sendvidExtractor, this._streamtapeExtractor, this._streamwishExtractor, this._filemoonExtractor, this._vidbomExtractor, this._lulustreamExtractor, this._streamrubyExtractor, this._upstreamExtractor, this._krakenfilesExtractor, this._thetubeExtractor, this._bigwarpExtractor, ];
+        for (const extractor of allExtractorMethods) {
             try {
-                const videos = await specificExtractor.func.call(this, url, prefix);
-                if (videos && videos.length > 0) return videos;
-            } catch (e) { /* Specific extractor failed, proceed to generic methods */ }
+                const videos = await extractor.call(this, url, prefix);
+                if (videos && videos.length > 0) {
+                    return videos;
+                }
+            } catch (e) { /* Continue to next extractor */ }
         }
-
-        // Stage 2: If specific extractor fails, perform deep content analysis.
+        return [];
+    }
+    
+    /**
+     * A powerful generic extractor for when specific methods fail.
+     * It fetches the page, unpacks any obfuscated JS, and scrapes for video links.
+     */
+    async _allinoneExtractor(url, prefix) {
         try {
             const res = await this.client.get(url, this._getVideoHeaders(url));
             const body = res.body;
             const videoHeaders = this._getVideoHeaders(url);
             let sources = [];
+            
             let potentialScripts = body;
             const packedScriptMatch = body.match(/eval\(function\(p,a,c,k,e,d\)\s?{.*}\)/);
             if (packedScriptMatch) {
                 try { potentialScripts += "\n" + unpackJs(packedScriptMatch[0]); } catch (e) {}
             }
+            
             const urlRegex = /(https?:\/\/[^"' \s]+\.(?:m3u8|mp4|webm|mkv|mov|flv|avi))[^"' \s]*/ig;
             let match;
             while ((match = urlRegex.exec(potentialScripts)) !== null) { sources.push(match[0]); }
+            
             const uniqueSources = [...new Set(sources.filter(s => s && s.startsWith("http")))];
             const allVideos = [];
             for (const sourceUrl of uniqueSources) {
@@ -175,28 +184,4 @@ class DefaultExtension extends MProvider {
     getSourcePreferences() { return [ { key: "preferred_quality", listPreference: { title: "الجودة المفضلة", summary: "اختر الجودة التي سيتم اختيارها تلقائيا", valueIndex: 1, entries: ["1080p", "720p", "480p", "360p", "Auto"], entryValues: ["1080", "720", "480", "360", "Auto"], } }, { key: "link_fetch_mode", listPreference: { title: "طريقة جلب الروابط", summary: "اختر من أي صفحة تريد جلب الروابط", valueIndex: 0, entries: ["مشاهدة وتحميل معاً", "صفحة المشاهدة فقط", "صفحة التحميل فقط"], entryValues: ["both", "watch", "download"] } }, { key: "hoster_selection", multiSelectListPreference: { title: "اختر السيرفرات", summary: "اختر السيرفرات التي تريد ان تظهر", entries: ["Cybervynx/Smoothpre", "Doodstream", "Mixdrop", "Vidguard", "Mp4upload", "Voe.sx", "Ok.ru", "Vidmoly", "Uqload", "VK", "Videa", "Dailymotion", "Sendvid", "Streamtape", "Streamwish/Filelions", "Filemoon", "Vidbom", "Lulustream", "Streamruby", "Upstream", "Krakenfiles", "TheTube", "BigWarp", "Other Embeds"], entryValues: ["cybervynx", "dood", "mixdrop", "vidguard", "mp4upload", "voe", "okru", "vidmoly", "uqload", "vk", "videa", "dailymotion", "sendvid", "streamtape", "streamwish", "filemoon", "vidbom", "lulustream", "streamruby", "upstream", "krakenfiles", "thetube", "bigwarp", "other"], values: ["cybervynx", "dood", "mixdrop", "streamwish", "vidguard"], } }, { key: "extract_m3u8_qualities", switchPreferenceCompat: { title: "استخراج الجودات من روابط M3U8", summary: "عندما يوفر السيرفر جودات متعددة، سيتم عرضها كلها. قم بتعطيل هذا الخيار لرؤية رابط 'تلقائي' واحد فقط.", value: true, } }, { key: "show_video_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط الفيديو (للتصحيح)", summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة", value: false, } }, { key: "show_embed_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط التضمين (للتصحيح)", summary: "عرض رابط التضمين الأولي بجانب اسم الجودة", value: false, } }, { key: "use_fallback_extractor", switchPreferenceCompat: { title: "استخدام مستخرج احتياطي (تجريبي)", summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام", value: true, } } ]; }
 }
 
-function unpackJs(packedJS) {
-    function unq(s) {
-        s = s || "";
-        if ((s[0] === '"' || s[0] === "'") && s[s.length - 1] === s[0]) { s = s.slice(1, -1); }
-        s = s.replace(/\\x([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\u([0-9A-Fa-f]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\\\/g, '\\').replace(/\\\//g, '/').replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\'/g, "'");
-        return s;
-    }
-    function itob(n, b) {
-        if (n === 0) return "0";
-        var d = "0123456789abcdefghijklmnopqrstuvwxyz", o = "";
-        while (n) { o = d[n % b] + o; n = Math.floor(n / b); }
-        return o;
-    }
-    try {
-        const re = /eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)\s*\{[\s\S]*?\}\s*\(\s*(['"])([\s\S]*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])([\s\S]*?)\5\.split\(['"]\|['"]\)/i;
-        let match = packedJS.match(re);
-        if (!match) return packedJS;
-        let p = unq(match[1] + match[2] + match[1]), a = +match[3], c = +match[4], k = unq("'" + match[6] + "'").split("|");
-        if (k.length < c) { for (var i = k.length; i < c; i++) k[i] = ""; }
-        for (i = c - 1; i >= 0; i--) { let t = itob(i, a), r = k[i] || t; p = p.replace(new RegExp('\\b' + t + '\\b', 'g'), r); }
-        return p;
-    } catch (e) {
-        return packedJS;
-    }
-}
+function unpackJs(packedJS) { function unq(s) { s = s || ""; if ((s[0] === '"' || s[0] === "'") && s[s.length - 1] === s[0]) { s = s.slice(1, -1); } s = s.replace(/\\x([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\u([0-9A-Fa-f]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\\\/g, '\\').replace(/\\\//g, '/').replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\'/g, "'"); return s; } function itob(n, b) { if (n === 0) return "0"; var d = "0123456789abcdefghijklmnopqrstuvwxyz", o = ""; while (n) { o = d[n % b] + o; n = Math.floor(n / b); } return o; } try { const re = /eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)\s*\{[\s\S]*?\}\s*\(\s*(['"])([\s\S]*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])([\s\S]*?)\5\.split\(['"]\|['"]\)/i; let match = packedJS.match(re); if (!match) return packedJS; let p = unq(match[1] + match[2] + match[1]), a = +match[3], c = +match[4], k = unq("'" + match[6] + "'").split("|"); if (k.length < c) { for (var i = k.length; i < c; i++) k[i] = ""; } for (i = c - 1; i >= 0; i--) { let t = itob(i, a), r = k[i] || t; p = p.replace(new RegExp('\\b' + t + '\\b', 'g'), r); } return p; } catch (e) { return packedJS; } }
