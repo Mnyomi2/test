@@ -8,7 +8,7 @@ const mangayomiSources = [{
     "typeSource": "single",
     "isNsfw": true,
     "itemType": 1,
-    "version": "1.0.0",
+    "version": "1.0.6",
     "pkgPath": "anime/src/en/hentaihaven.js"
 }];
 
@@ -18,12 +18,19 @@ class DefaultExtension extends MProvider {
         this.client = new Client();
     }
 
+    /**
+     * Dynamically determines if the "Latest" tab should be shown based on user preference.
+     */
+    get supportsLatest() {
+        return this.getPreference("enable_latest_tab");
+    }
+
     getPreference(key) {
         return new SharedPreferences().get(key);
     }
-
+    
     getBaseUrl() {
-        return this.source.baseUrl;
+        return this.getPreference("override_base_url") || this.source.baseUrl;
     }
 
     getHeaders(url) {
@@ -38,9 +45,12 @@ class DefaultExtension extends MProvider {
         const url = `${this.getBaseUrl()}/?page=${page}`;
         return this.parseDirectory(url);
     }
-
+    
+    /**
+     * Fetches the latest updates. This method is called only when the "Latest" tab is enabled
+     * by the user in the source preferences. It mirrors the getPopular functionality.
+     */
     async getLatestUpdates(page) {
-        // The site's homepage is the latest updates.
         return this.getPopular(page);
     }
 
@@ -58,7 +68,8 @@ class DefaultExtension extends MProvider {
         for (const item of items) {
             const name = item.selectFirst("div.video_title").text;
             const link = this.getBaseUrl() + item.getHref;
-            const imageUrl = this.getBaseUrl() + item.selectFirst("img").getSrc;
+            const imgElement = item.selectFirst("img");
+            const imageUrl = this.getBaseUrl() + (imgElement.attr("data-src") || imgElement.getSrc);
             list.push({ name, imageUrl, link });
         }
 
@@ -72,13 +83,39 @@ class DefaultExtension extends MProvider {
 
         const seriesName = doc.selectFirst("span:contains(Series) + span.sub_r a")?.text;
         const name = seriesName ?? doc.selectFirst("h1.video_title").text;
-        const imageUrl = this.getBaseUrl() + doc.selectFirst("div.cover img").getSrc;
-        const description = doc.selectFirst("div.video_description p")?.text ?? "";
+        
+        const imgElement = doc.selectFirst("div.cover img");
+        const imageUrl = this.getBaseUrl() + (imgElement.attr("data-src") || imgElement.getSrc);
+
+        const originalDescription = doc.selectFirst("div.video_description p")?.text?.trim() ?? "";
+        
+        const details = [];
+        const brand = doc.selectFirst("span:contains(Brand) + span.sub_r")?.text;
+        if (brand) details.push(`Brand: ${brand}`);
+
+        const releaseDate = doc.selectFirst("span:contains(Release Date) + span.sub_r")?.text;
+        if (releaseDate) details.push(`Release Date: ${releaseDate}`);
+        
+        const uploadDate = doc.selectFirst("span:contains(Upload Date) + span.sub_r")?.text;
+        if (uploadDate) details.push(`Upload Date: ${uploadDate}`);
+
+        const views = doc.selectFirst("span:contains(Views) + span.sub_r")?.text;
+        if (views) details.push(`Views: ${views}`);
+
+        const altTitles = doc.selectFirst("div.r_item.full span.sub_t")?.text;
+        if (altTitles) details.push(`Alternate Titles: ${altTitles}`);
+
+        let description = "";
+        if (details.length > 0) {
+            description += details.join("\n") + "\n\n";
+        }
+        description += originalDescription;
+
         const link = url;
-        const status = 1; // All items are single episodes, treated as 'Completed'
+        const status = 1;
 
         const genre = [];
-        const genreElements = doc.select(".video_tags > a, .tags_list > a");
+        const genreElements = doc.select("div.video_tags > a[href*='/genre/']");
         for (const element of genreElements) {
             genre.push(element.text);
         }
@@ -94,7 +131,6 @@ class DefaultExtension extends MProvider {
             }
             chapters.reverse();
         } else {
-            // Handle standalone videos not part of a series
             const epName = doc.selectFirst("h1.video_title").text;
             chapters.push({ name: epName, url: url });
         }
@@ -107,19 +143,25 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
         const streams = [];
 
-        const playerDataId = doc.selectFirst("li[data-id]")?.attr("data-id");
+        const iframeSrc1 = doc.selectFirst("div.player iframe")?.getSrc;
+        if (!iframeSrc1) {
+            return [];
+        }
+
+        const res1 = await this.client.get(iframeSrc1, this.getHeaders(url));
+        const doc1 = new Document(res1.body);
+        const playerDataId = doc1.selectFirst("li[data-id]")?.attr("data-id");
         if (!playerDataId) {
             return [];
         }
 
         const playerUrl = "https://nhplayer.com" + playerDataId;
-        const playerRes = await this.client.get(playerUrl, this.getHeaders(playerUrl));
+        const playerRes = await this.client.get(playerUrl, this.getHeaders(iframeSrc1));
         const scriptContent = playerRes.body;
 
         const streamUrlMatch = scriptContent.match(/file:\s*['"](.*?)['"]/);
         if (streamUrlMatch && streamUrlMatch[1]) {
             const fullStreamUrl = streamUrlMatch[1];
-            // Remove query parameters like '?expire=...' as requested
             const streamUrl = fullStreamUrl.split("?")[0];
 
             streams.push({
@@ -138,6 +180,25 @@ class DefaultExtension extends MProvider {
     }
 
     getSourcePreferences() {
-        return [];
+        return [
+            {
+                key: "enable_latest_tab",
+                switchPreferenceCompat: {
+                    title: "Enable 'Latest' Tab",
+                    summary: "Toggles the visibility of the 'Latest' tab for this source.",
+                    value: false, // Original state was disabled
+                }
+            },
+            {
+                key: "override_base_url",
+                editTextPreference: {
+                    title: "Override Base URL",
+                    summary: "Use a different mirror/domain for the source",
+                    value: this.source.baseUrl,
+                    dialogTitle: "Enter new Base URL",
+                    dialogMessage: "",
+                }
+            }
+        ];
     }
 }
