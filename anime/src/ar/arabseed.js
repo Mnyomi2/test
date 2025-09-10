@@ -3,304 +3,253 @@ const mangayomiSources = [{
     "name": "ArabSeed",
     "id": 6219374582,
     "lang": "ar",
-    "baseUrl": "https://e.arabseed.ink",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=arabseed.ink",
-    "typeSource": "single",
+    "baseUrl": "https://a.asd.homes",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=asd.homes",
+    "typeSource": "multi",
     "itemType": 1,
-    "version": "1.0.0",
+    "version": "1.3.8",
     "pkgPath": "anime/src/ar/arabseed.js"
 }];
 
-
-
-
+// --- CLASS ---
 class DefaultExtension extends MProvider {
     constructor() {
         super();
         this.client = new Client();
     }
 
+    // --- PREFERENCES ---
     getPreference(key) {
         return new SharedPreferences().get(key);
     }
 
-    getHeaders() {
-        return {
-            "Referer": this.source.baseUrl,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
-        };
+    getBaseUrl() {
+        return this.getPreference("override_base_url") || this.source.baseUrl;
     }
 
-    // --- Helper Methods ---
+    // --- HELPERS ---
+    getIntFromText(text) {
+        if (!text) return null;
+        const match = text.match(/\d+/);
+        return match ? parseInt(match[0]) : null;
+    }
 
-    parseCatalogue(doc) {
-        const list = [];
-        const items = doc.select("div.Grid--WecimaPosts div.GridItem div.Thumb--GridItem");
-        for (const item of items) {
-            const linkElement = item.selectFirst("a");
-            const name = linkElement.attr("title");
-            const link = linkElement.getHref;
-            const imageUrl = item.selectFirst("a > span.BG--GridItem")
-                .attr("data-lazy-style")
-                .split("url(")[1].split(");")[0];
-            
-            list.push({ name, link, imageUrl });
-        }
-        const hasNextPage = doc.selectFirst("ul.page-numbers li a.next") != null;
+    // --- CATALOGUE & SEARCH ---
+    async getPopular(page) {
+        const url = page === 1 ? `${this.getBaseUrl()}/movies/` : `${this.getBaseUrl()}/movies/?offset=${page}`;
+        const res = await this.client.get(url, {}, { timeout: 120000 });
+        const doc = new Document(res.body);
+        
+        const list = doc.select("div.item__contents").map(element => {
+            const anchor = element.selectFirst("a");
+            const title = anchor?.attr("title")?.trim() || "";
+            const link = anchor?.getHref;
+            const imageUrl = element.selectFirst("img")?.getSrc || "";
+            if (!title || !link) return null;
+            return { name: title, link, imageUrl };
+        }).filter(it => it != null);
+        
+        const hasNextPage = doc.selectFirst("div.pagination a.next") != null;
         return { list, hasNextPage };
     }
 
-    getNumberFromEpsString(epsStr) {
-        return epsStr.replace(/[^0-9]/g, '');
-    }
-
-    // --- Catalogue Methods ---
-
-    async getPopular(page) {
-        const url = `${this.source.baseUrl}/movies/?page_no=${page}`;
-        const res = await this.client.get(url, this.getHeaders());
-        const doc = new Document(res.body);
-        return this.parseCatalogue(doc);
-    }
-
     async getLatestUpdates(page) {
-        const url = `${this.source.baseUrl}/page/${page}`;
-        const res = await this.client.get(url, this.getHeaders());
+        const url = page === 1 ? `${this.getBaseUrl()}/recently/` : `${this.getBaseUrl()}/recently/?offset=${page}`;
+        const res = await this.client.get(url, {}, { timeout: 120000 });
         const doc = new Document(res.body);
-        return this.parseCatalogue(doc);
+    
+        const list = doc.select("div.item__contents").map(element => {
+            const anchor = element.selectFirst("a");
+            const title = anchor?.attr("title")?.trim() || "";
+            const link = anchor?.getHref;
+            const imageUrl = element.selectFirst("img")?.getSrc || "";
+            if (!title || !link) return null;
+            return { name: title, link, imageUrl };
+        }).filter(it => it != null);
+    
+        const hasNextPage = doc.selectFirst("div.pagination a.next") != null;
+        return { list, hasNextPage };
     }
 
     async search(query, page, filters) {
         let url;
         if (query) {
-            const categoryValue = filters[1]?.values[filters[1].state]?.value ?? "page/";
-            url = `${this.source.baseUrl}/search/${query}/${categoryValue}${page}/`;
+            url = page === 1 ? `${this.getBaseUrl()}/find/?find=${encodeURIComponent(query)}` : `${this.getBaseUrl()}/find/?find=${encodeURIComponent(query)}&offset=${page}`;
         } else {
-            const sectionValue = filters[0]?.values[filters[0].state]?.value;
-            if (sectionValue) {
-                url = `${this.source.baseUrl}/${sectionValue}/page/${page}/`;
-            } else {
-                const genreValue = filters[2]?.values[filters[2].state]?.value ?? "";
-                const categoryValue = filters[1]?.values[filters[1].state]?.value ?? "page/";
-                url = `${this.source.baseUrl}/genre/${genreValue}/${categoryValue}${page}/`;
-            }
+            const categoryFilter = filters.find(f => f.name === "القسم");
+            const selectedCategory = categoryFilter.values[categoryFilter.state].value;
+            if (!selectedCategory) return this.getPopular(page);
+            url = page === 1 ? `${this.getBaseUrl()}${selectedCategory}` : `${this.getBaseUrl()}${selectedCategory}?offset=${page}`;
         }
         
-        const res = await this.client.get(url, this.getHeaders());
+        const res = await this.client.get(url);
         const doc = new Document(res.body);
-        return this.parseCatalogue(doc);
+        
+        const list = doc.select("div.item__contents").map(element => {
+            const anchor = element.selectFirst("a");
+            const title = anchor?.attr("title")?.trim() || "";
+            const link = anchor?.getHref;
+            const imageUrl = element.selectFirst("img")?.getSrc || "";
+            if (!title || !link) return null;
+            return { name: title, link, imageUrl };
+        }).filter(it => it != null);
+        
+        const hasNextPage = doc.selectFirst("div.pagination a.next") != null;
+        return { list, hasNextPage };
     }
 
-    // --- Details & Episodes ---
-
+    // --- DETAILS ---
     async getDetail(url) {
-        const res = await this.client.get(this.source.baseUrl + url, this.getHeaders());
+        const initialUrl = url;
+        const res = await this.client.get(url);
         const doc = new Document(res.body);
         
-        const name = doc.selectFirst("div.Title--Content--Single-begin > h1")?.text
-                       .split(" (")[0]
-                       .replace(/مشاهدة (فيلم|مسلسل|انمي|برنامج) /, "")
-                       .split("مترجم")[0].trim();
+        const name = (doc.selectFirst("div.BreadCrumbs ol li:last-child a span")?.text || doc.selectFirst("h1.Title")?.text || "")
+            .replace(/مترجم|فيلم|مسلسل/g, "").trim();
 
-        const genre = doc.select("ul.Terms--Content--Single-begin li:contains(النوع) p a").map(e => e.text).join(", ");
-        let description = doc.selectFirst("div.AsideContext > div.StoryMovieContent")?.text ?? "";
-        const author = doc.select("li:contains(شركات الإنتاج) > p > a").map(e => e.text).join(", ");
+        const posterElement = doc.selectFirst("div.Poster > img");
+        const imageUrl = posterElement?.attr("data-src") || posterElement?.attr("data-lazy-src") || posterElement?.getSrc || "";
         
-        const altNameArabic = doc.selectFirst("ul.Terms--Content--Single-begin li:contains(الإسم بالعربي) p")?.text;
-        if (altNameArabic) {
-            description += `\n\nالإسم بالعربي: ${altNameArabic}`;
-        }
-        
-        const altNameKnownAs = doc.selectFirst("ul.Terms--Content--Single-begin li:contains(معروف ايضاََ بـ) p")?.text;
-        if (altNameKnownAs) {
-            description += `\n\nمعروف ايضاََ بـ: ${altNameKnownAs}`;
+        const description = doc.selectFirst("meta[name='keywords']")?.attr("content")?.trim() ||
+                            doc.selectFirst("p.descrip:nth-of-type(2)")?.text?.trim() ||
+                            doc.selectFirst("p.descrip")?.text?.trim() ||
+                            "لا يوجد وصف متاح لهذا العرض.";
+
+        const metaTerms = doc.select("div.MetaTermsInfo > li");
+        const metaMap = {};
+
+        for (const li of metaTerms) {
+            const label = li.selectFirst("span")?.text?.trim();
+            if (!label) continue;
+
+            const key = label.replace(/:$/, "").trim();
+            const links = li.select("a");
+
+            if (links.length > 0) {
+                metaMap[key] = links.map(a => a.text.trim());
+            } else {
+                const text = li.text.replace(label, "").replace(/\n/g, "").trim();
+                if (text) metaMap[key] = [text];
+            }
         }
 
-        // --- Episodes Parsing ---
+        const genre = metaMap["النوع"] || [];
+        const year = metaMap["السنه"]?.[0] || "";
+        const language = metaMap["اللغة"] || [];
+        const quality = metaMap["الجودة"]?.[0] || "";
+        const country = metaMap["الدولة"]?.[0] || "";
+        const releaseDate = metaMap["اليوم"]?.[0] || "";
+
         const chapters = [];
-        const episodeElements = doc.select("div.Episodes--Seasons--Episodes a");
+        const episodeElements = doc.select("div.ContainerEpisodesList a");
 
-        if (episodeElements.length === 0) {
-            const movieSeries = doc.select("singlerelated.hasdivider:contains(سلسلة) div.Thumb--GridItem a");
-            if (movieSeries.length > 0) {
-                movieSeries.sort((a, b) => {
-                    const yearA = parseInt(this.getNumberFromEpsString(a.selectFirst(".year")?.text ?? "0"));
-                    const yearB = parseInt(this.getNumberFromEpsString(b.selectFirst(".year")?.text ?? "0"));
-                    return yearB - yearA;
-                });
-                movieSeries.forEach(el => {
+        if (episodeElements.length > 0) {
+            episodeElements.forEach(epEl => {
+                const epNumStr = epEl.selectFirst("em")?.text?.trim();
+                if (epNumStr) {
                     chapters.push({
-                        name: el.text.replace("مشاهدة فيلم ", "").split("مترجم")[0],
-                        url: el.getHref
-                    });
-                });
-            } else {
-                const movieElement = doc.selectFirst("div.Poster--Single-begin > a");
-                if (movieElement) {
-                    chapters.push({
-                        name: "مشاهدة",
-                        url: movieElement.getHref
+                        name: `الحلقة ${epNumStr}`,
+                        url: epEl.getHref,
+                        episode: parseFloat(epNumStr),
                     });
                 }
-            }
+            });
         } else {
-            const seasonElements = doc.select("div.List--Seasons--Episodes a");
-            if (seasonElements.length === 0) {
-                episodeElements.forEach(el => {
-                    chapters.push({
-                        name: `الموسم 1 : ${el.text}`,
-                        url: el.getHref
-                    });
-                });
-            } else {
-                for (const season of seasonElements.reverse()) {
-                    const seNum = this.getNumberFromEpsString(season.text);
-                    let seasonDoc = doc;
-                    if (!season.hasClass("selected")) {
-                        const seasonRes = await this.client.get(season.getHref, this.getHeaders());
-                        seasonDoc = new Document(seasonRes.body);
-                    }
-                    seasonDoc.select("div.Episodes--Seasons--Episodes a").forEach(ep => {
-                        chapters.push({
-                            name: `الموسم ${seNum} : ${ep.text}`,
-                            url: ep.getHref
-                        });
-                    });
-                }
-            }
+            chapters.push({ name: "مشاهدة", url: initialUrl });
         }
-        
-        return { name, genre, description, author, chapters, link: this.source.baseUrl + url };
+
+        return {
+            name,
+            imageUrl,
+            description,
+            genre,
+            extraInfo: {
+                year,
+                language: language.join(", "),
+                quality,
+                country,
+                releaseDate
+            },
+            chapters
+        };
     }
 
-    // --- Video Extraction ---
-
+    // --- VIDEO ---
     async getVideoList(url) {
-        const res = await this.client.get(this.source.baseUrl + url, this.getHeaders());
+        const res = await this.client.get(url);
         const doc = new Document(res.body);
-        const serverElements = doc.select("ul.WatchServersList li");
-        let videos = [];
-        
-        for (const element of serverElements) {
-            try {
-                const iframeUrl = element.selectFirst("btn").attr("data-url");
-                const serverText = element.text.toLowerCase();
-                const refererHeader = { "Referer": this.source.baseUrl + "/" };
 
-                if (element.hasClass("MyCimaServer") && iframeUrl.includes("/run/")) {
-                    const mp4Url = iframeUrl.replace("?Key", "/?Key") + "&auto=true";
-                    videos.push({
-                        url: mp4Url,
-                        quality: "Default (قد يستغرق وقتا)",
-                        originalUrl: mp4Url,
-                        headers: refererHeader
-                    });
-                } else if (["govid", "vidbom", "vidshare"].some(s => serverText.includes(s))) {
-                    videos.push(...(await this.govidExtractor(iframeUrl, "Vid" + serverText, refererHeader)));
-                } else if (serverText.includes("dood")) {
-                    videos.push({ url: iframeUrl, quality: "Dood", headers: refererHeader });
-                } else if (serverText.includes("ok.ru")) {
-                    videos.push({ url: iframeUrl, quality: "Okru", headers: refererHeader });
-                } else if (serverText.includes("uqload")) {
-                    // Note: UqloadExtractor logic wasn't provided, so returning the URL.
-                    videos.push({ url: iframeUrl, quality: "Uqload", headers: refererHeader });
-                }
-            } catch(e) {
-                // Ignore errors from single server
-            }
-        }
+        const watchUrl = doc.selectFirst("a.watchBTn")?.getHref;
+        if (!watchUrl) throw new Error("Watch button not found.");
 
-        const preferredQuality = this.getPreference("preferred_quality") || "1080";
-        videos.sort((a, b) => {
-            const aPreferred = a.quality.includes(preferredQuality);
-            const bPreferred = b.quality.includes(preferredQuality);
-            if (aPreferred && !bPreferred) return -1;
-            if (!aPreferred && bPreferred) return 1;
-            return 0; // Basic sort if no match, can be improved
-        });
-
-        return videos;
-    }
-
-    async govidExtractor(url, host, headers) {
-        const res = await this.client.get(url, headers);
-        const doc = new Document(res.body);
-        const script = doc.selectFirst("script:contains(sources)");
-        if (!script) return [];
-
-        const scriptData = script.text;
-        const sourcesRaw = scriptData.split("sources: [")[1]?.split("],")[0];
-        if (!sourcesRaw) return [];
+        const watchRes = await this.client.get(watchUrl, { "Referer": this.getBaseUrl() });
+        const watchDoc = new Document(watchRes.body);
 
         const videos = [];
-        const sourceParts = sourcesRaw.split('file:"').slice(1);
-        for (const part of sourceParts) {
-            const src = part.split('"')[0];
-            let quality = part.split('label:"')[1]?.split('"')[0] ?? "480p";
-            if (quality.length > 15) quality = "480p";
-            
-            videos.push({
-                url: src,
-                originalUrl: src,
-                quality: `${host}: ${quality}`,
-                headers: headers,
-            });
+        
+        for (const element of watchDoc.select("div.containerServers ul li")) {
+            const quality = element.text;
+            const iframeUrl = element.attr("data-link");
+
+            if (iframeUrl.includes("reviewtech") || iframeUrl.includes("reviewrate")) {
+                try {
+                    const iframeRes = await this.client.get(iframeUrl);
+                    const iframeDoc = new Document(iframeRes.body);
+                    const sourceUrl = iframeDoc.selectFirst("source")?.attr("src");
+                    if (sourceUrl) {
+                        videos.push({
+                            url: sourceUrl,
+                            quality: quality,
+                            originalUrl: sourceUrl,
+                            headers: { "Referer": iframeUrl }
+                        });
+                    }
+                } catch (e) {
+                    console.log(`Failed to extract from ${iframeUrl}: ${e}`);
+                }
+            }
         }
+        
+        if (videos.length === 0) throw new Error("No compatible servers found.");
         return videos;
     }
-
-
-    // --- Filters & Preferences ---
-
+    
+    // --- FILTERS & PREFERENCES ---
     getFilterList() {
-        const createFilter = (displayName, pairs) => ({
-            type_name: "SelectFilter",
-            name: displayName,
-            state: 0,
-            values: pairs.map(p => ({ type_name: "SelectOption", name: p[0], value: p[1] }))
-        });
-
-        return [
-            { type_name: "HeaderFilter", name: "هذا القسم يعمل لو كان البحث فارغ" },
-            createFilter("اقسام الموقع", [
-                ["اختر", ""], ["جميع الافلام", "movies"], ["افلام اجنبى", "category/أفلام/10-movies-english-افلام-اجنبي"],
-                ["افلام عربى", "category/أفلام/افلام-عربي-arabic-movies"], ["افلام هندى", "category/أفلام/افلام-هندي-indian-movies"],
-                ["افلام تركى", "category/أفلام/افلام-تركى-turkish-films"], ["افلام وثائقية", "category/أفلام/افلام-وثائقية-documentary-films"],
-                ["افلام انمي", "category/افلام-كرتون"], ["سلاسل افلام", "category/أفلام/10-movies-english-افلام-اجنبي/سلاسل-الافلام-الكاملة-full-pack"],
-                ["مسلسلات", "seriestv"], ["مسلسلات اجنبى", "category/مسلسلات/5-series-english-مسلسلات-اجنبي"],
-                ["مسلسلات عربى", "category/مسلسلات/5-series-english-مسلسلات-اجنبي"], ["مسلسلات هندى", "category/مسلسلات/9-series-indian-مسلسلات-هندية"],
-                ["مسلسلات اسيوى", "category/مسلسلات/مسلسلات-اسيوية"], ["مسلسلات تركى", "category/مسلسلات/8-مسلسلات-تركية-turkish-series"],
-                ["مسلسلات وثائقية", "category/مسلسلات/مسلسلات-وثائقية-documentary-series"], ["مسلسلات انمي", "category/مسلسلات-كرتون"],
-                ["NETFLIX", "production/netflix"], ["WARNER BROS", "production/warner-bros"],
-                ["LIONSGATE", "production/lionsgate"], ["DISNEY", "production/walt-disney-pictures"],
-                ["COLUMBIA", "production/columbia-pictures"]
-            ]),
-            { type_name: "SeparatorFilter" },
-            { type_name: "HeaderFilter", name: "النوع يستخدم فى البحث و التصنيف" },
-            createFilter("النوع", [
-                ["فيلم", "page/"], ["مسلسل", "list/series/?page_number="],
-                ["انمى", "list/anime/?page_number="], ["برنامج", "list/tv/?page_number="]
-            ]),
-            { type_name: "SeparatorFilter" },
-            { type_name: "HeaderFilter", name: "التصنيف يعمل لو كان اقسام الموقع على 'اختر' فقط" },
-            createFilter("التصنيف", [
-                ["اكشن", "اكشن-action"], ["مغامرات", "مغامرات-adventure"], ["خيال علمى", "خيال-علمى-science-fiction"],
-                ["فانتازيا", "فانتازيا-fantasy"], ["كوميديا", "كوميديا-comedy"], ["دراما", "دراما-drama"],
-                ["جريمة", "جريمة-crime"], ["اثارة", "اثارة-thriller"], ["رعب", "رعب-horror"],
-                ["سيرة ذاتية", "سيرة-ذاتية-biography"], ["كرتون", "كرتون"], ["انيميشين", "انيميشين-anime"]
-            ])
+        const categories = [
+            { name: 'الكل', value: '' },
+            { name: 'افلام Netfilx', value: '/category/netfilx/افلام-netfilx/' },
+            { name: 'افلام اجنبي', value: '/category/foreign-movies/' },
+            { name: 'افلام عربي', value: '/category/arabic-movies-5/' },
+            { name: 'افلام اسيوية', value: '/category/asian-movies/' },
+            { name: 'افلام تركية', value: '/category/turkish-movies/' },
+            { name: 'افلام هندى', value: '/category/indian-movies/' },
+            { name: 'افلام انيميشن', value: '/category/افلام-انيميشن/' },
+            { name: 'مسلسلات عربي', value: '/category/arabic-series/' },
+            { name: 'مسلسلات اجنبي', value: '/category/foreign-series/' },
+            { name: 'مسلسلات تركيه', value: '/category/turkish-series-1/' },
+            { name: 'مسلسلات كرتون', value: '/category/cartoon-series/' },
+            { name: 'مسلسلات رمضان 2025', value: '/category/مسلسلات-رمضان/ramadan-series-2025/' },
+            { name: 'مصارعه', value: '/category/wwe-shows/' }
         ];
+
+        return [{
+            type_name: "SelectFilter",
+            name: "القسم",
+            state: 0,
+            values: categories.map(c => ({ type_name: "SelectOption", name: c.name, value: c.value }))
+        }];
     }
 
     getSourcePreferences() {
         return [{
-            key: "preferred_quality",
-            listPreference: {
-                title: "الجودة المفضلة",
-                summary: "اختر الجودة التي ستظهر أولاً في قائمة السيرفرات",
-                valueIndex: 0,
-                entries: ["1080p", "720p", "480p", "360p", "240p", "Vidbom", "Vidshare", "Dood", "Default"],
-                entryValues: ["1080", "720", "480", "360", "240", "Vidbom", "Vidshare", "Dood", "Default"]
+            key: "override_base_url",
+            editTextPreference: {
+                title: "Override Base URL",
+                summary: "For temporary changes to the domain.",
+                value: this.source.baseUrl,
+                dialogTitle: "Enter new Base URL",
+                dialogMessage: "Default: " + this.source.baseUrl,
             }
         }];
     }
