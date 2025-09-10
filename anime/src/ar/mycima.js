@@ -11,6 +11,7 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/ar/mycima.js"
 }];
 
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -94,23 +95,40 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(this.source.baseUrl + url, this.getHeaders());
         const doc = new Document(res.body);
         
-        const name = doc.selectFirst("div.Title--Content--Single-begin > h1")?.text
-                       .split(" (")[0]
-                       .replace(/مشاهدة (فيلم|مسلسل|انمي|برنامج) /, "")
-                       .split("مترجم")[0].trim();
+        // Main title from h1 tag
+        let name = doc.selectFirst("div.Title--Content--Single-begin > h1")?.text
+            .split(" (")[0].trim();
 
-        const genre = doc.select("ul.Terms--Content--Single-begin li:contains(النوع) p a").map(e => e.text).join(", ");
+        // Fallback title logic for series or other layouts
+        if (!name) {
+            name = doc.selectFirst("li:contains(المسلسل) p")?.text ??
+                   doc.selectFirst("singlerelated.hasdivider:contains(سلسلة) a")?.text;
+        }
+
+        const imageUrl = doc.selectFirst("wecima.separated--top")
+            ?.attr("data-lazy-style")
+            .split("url(")[1].split(");")[0];
+        
+        const genre = doc.select("ul.Terms--Content--Single-begin li:contains(النوع) p a, ul.Terms--Content--Single-begin li:contains(التصنيف) p a")
+            .map(e => e.text).join(", ");
+        
         let description = doc.selectFirst("div.AsideContext > div.StoryMovieContent")?.text ?? "";
+        
         const author = doc.select("li:contains(شركات الإنتاج) > p > a").map(e => e.text).join(", ");
         
-        const altNameArabic = doc.selectFirst("ul.Terms--Content--Single-begin li:contains(الإسم بالعربي) p")?.text;
-        if (altNameArabic) {
-            description += `\n\nالإسم بالعربي: ${altNameArabic}`;
+        // Append alternative names to the description
+        const altNames = [];
+        const arabicName = doc.selectFirst("ul.Terms--Content--Single-begin li:contains(الإسم بالعربي) p")?.text;
+        if (arabicName) {
+            altNames.push(`الإسم بالعربي: ${arabicName}`);
         }
-        
-        const altNameKnownAs = doc.selectFirst("ul.Terms--Content--Single-begin li:contains(معروف ايضاََ بـ) p")?.text;
-        if (altNameKnownAs) {
-            description += `\n\nمعروف ايضاََ بـ: ${altNameKnownAs}`;
+        const alsoKnownAs = doc.selectFirst("ul.Terms--Content--Single-begin li:contains(معروف ايضاََ بـ) p")?.text;
+        if (alsoKnownAs) {
+            altNames.push(`معروف ايضاََ بـ: ${alsoKnownAs}`);
+        }
+
+        if (altNames.length > 0) {
+            description += `\n\n${altNames.join("\n")}`;
         }
 
         // --- Episodes Parsing ---
@@ -127,7 +145,7 @@ class DefaultExtension extends MProvider {
                 });
                 movieSeries.forEach(el => {
                     chapters.push({
-                        name: el.text.replace("مشاهدة فيلم ", "").split("مترجم")[0],
+                        name: el.text.replace(/مشاهدة (فيلم|مسلسل) /g, "").split("مترجم")[0].trim(),
                         url: el.getHref
                     });
                 });
@@ -167,7 +185,7 @@ class DefaultExtension extends MProvider {
             }
         }
         
-        return { name, genre, description, author, chapters, link: this.source.baseUrl + url };
+        return { name, imageUrl, genre, description, author, chapters, link: this.source.baseUrl + url };
     }
 
     // --- Video Extraction ---
