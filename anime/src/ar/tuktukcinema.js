@@ -18,315 +18,92 @@ class DefaultExtension extends MProvider {
     }
 
     // --- PREFERENCES AND HEADERS ---
-    getPreference(key) {
-        return new SharedPreferences().get(key);
-    }
-    getBaseUrl() {
-        return this.source.baseUrl;
-    }
-    getHeaders(url) {
-        return {
-            "Referer": this.getBaseUrl() + "/",
-            "Origin": this.getBaseUrl(),
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0"
-        };
-    }
+    getPreference(key) { return new SharedPreferences().get(key); }
+    getBaseUrl() { return this.source.baseUrl; }
+    getHeaders(url) { return { "Referer": this.getBaseUrl() + "/", "Origin": this.getBaseUrl(), "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0" }; }
     _getVideoHeaders(refererUrl) {
         const headers = this.getHeaders(refererUrl);
         headers["Referer"] = refererUrl;
-        try {
-            const url = new URL(refererUrl);
-            headers["Origin"] = url.origin;
-        } catch (e) {
-            headers["Origin"] = this.getBaseUrl();
-        }
+        try { const url = new URL(refererUrl); headers["Origin"] = url.origin; } catch (e) { headers["Origin"] = this.getBaseUrl(); }
         return headers;
     }
 
     // --- TITLE NORMALIZATION ---
     _titleEdit(title) {
-        let e = title ? title.trim() : "";
-        if (!e) return e;
-
+        let e = title ? title.trim() : ""; if (!e) return e;
         const t = { "الاول": "1", "الثاني": "2", "الثالث": "3", "الرابع": "4", "الخامس": "5", "السادس": "6", "السابع": "7", "الثامن": "8", "التاسع": "9", "العاشر": "10", "الحادي عشر": "11", "الثاني عشر": "12" };
-        
-        e = e.replace(/[\u2013\u2014\u2015\u2212]/g, "-")
-             .replace(/\s*\(.*?\)\s*/g, " ")
-             .replace(/\s*\[.*?\]\s*/g, " ");
-        
-        let r = "";
-        e = e.replace(/\b(\d{4})\b/, (match, p1) => {
-            r = p1;
-            return "";
-        }).replace(/^(?:فيلم|عرض|مسلسل|برنامج|انمي)\s+/i, "");
-
-        Object.keys(t).forEach(key => {
-            const i = new RegExp(`الموسم\\s*(?:ال)*${key}\\b`, "gi");
-            e = e.replace(i, `الموسم ${t[key]}`);
-        });
-
-        e = e.replace(/الموسم\s*(\d+)/gi, "s$1")
-             .replace(/الحلقة\s*(\d+)/gi, "E$1")
-             .replace(/\s+(?:مترجم|مترجمة|مدبلج|مدبلجة|اون لاين|اونلاين|كامل|بجودة|جودة|عالية|حصريا|مشاهدة)\s*$/gi, "")
-             .replace(/\b(?:HD|4K|FHD|UHD|HDRip|BluRay|WEB-DL|720p|1080p)\b/gi, "")
-             .replace(/\s+/g, " ");
-        
-        if (r) {
-            e += ` (${r})`;
-        }
-        return e.trim();
+        e = e.replace(/[\u2013\u2014\u2015\u2212]/g, "-").replace(/\s*\(.*?\)\s*/g, " ").replace(/\s*\[.*?\]\s*/g, " "); let r = "";
+        e = e.replace(/\b(\d{4})\b/, (match, p1) => { r = p1; return ""; }).replace(/^(?:فيلم|عرض|مسلسل|برنامج|انمي)\s+/i, "");
+        Object.keys(t).forEach(key => { const i = new RegExp(`الموسم\\s*(?:ال)*${key}\\b`, "gi"); e = e.replace(i, `الموسم ${t[key]}`); });
+        e = e.replace(/الموسم\s*(\d+)/gi, "s$1").replace(/الحلقة\s*(\d+)/gi, "E$1").replace(/\s+(?:مترجم|مترجمة|مدبلج|مدبلجة|اون لاين|اونلاين|كامل|بجودة|جودة|عالية|حصريا|مشاهدة)\s*$/gi, "").replace(/\b(?:HD|4K|FHD|UHD|HDRip|BluRay|WEB-DL|720p|1080p)\b/gi, "").replace(/\s+/g, " ");
+        if (r) { e += ` (${r})`; } return e.trim();
     }
     
     // --- BROWSE/SEARCH/DETAIL METHODS ---
-    async requestDoc(path) {
-        const url = this.source.baseUrl + path;
-        const res = await this.client.get(url, this.getHeaders(url));
-        return new Document(res.body);
-    }
-
-    async _parseCataloguePage(doc, isSearch = false) {
-        const list = [];
-        const items = doc.select("div.Block--Item, div.Small--Box");
-        items.forEach(item => {
-            const linkElement = item.selectFirst("a");
-            if (!linkElement) return;
-
-            const name = this._titleEdit(linkElement.attr("title"));
-            let imageUrlAttr = isSearch ? "src" : "data-src";
-            const imageUrl = item.selectFirst("img")?.attr(imageUrlAttr);
-            const link = linkElement.getHref;
-            list.push({ name, imageUrl, link });
-        });
-        const hasNextPage = !!doc.selectFirst("div.pagination ul.page-numbers li a.next");
-        return { list, hasNextPage };
-    }
-
-    async getPopular(page) {
-        const doc = await this.requestDoc(`/category/movies/?page=${page}`);
-        return await this._parseCataloguePage(doc);
-    }
-
-    async getLatestUpdates(page) {
-        const doc = await this.requestDoc(`/recent/page/${page}/`);
-        return await this._parseCataloguePage(doc);
-    }
-
-    async search(query, page, filters) {
-        let path;
-        if (query) {
-            path = `/?s=${encodeURIComponent(query)}&page=${page}`;
-        } else {
-            const categoryFilter = filters[0];
-            const selectedCategory = categoryFilter.values[categoryFilter.state].value;
-            if (selectedCategory) {
-                path = `/${selectedCategory}?page=${page}/`;
-            } else {
-                return this.getPopular(page);
-            }
-        }
-        const doc = await this.requestDoc(path);
-        return await this._parseCataloguePage(doc, !!query);
-    }
-
-    async getDetail(url) {
-        const doc = await this.requestDoc(url.replace(this.source.baseUrl, ''));
-        const name = this._titleEdit(doc.selectFirst("h1.post-title")?.text || "Unknown Title");
-        const imageUrl = doc.selectFirst("div.left div.image img")?.getSrc;
-        const description = doc.selectFirst("div.story")?.text.trim();
-        const genre = doc.select("div.catssection li a").map(e => e.text);
-        const chapters = [];
-        const episodeElements = doc.select("section.allepcont div.row a");
-        if (episodeElements.length > 0) {
-            const sortedEpisodes = [...episodeElements].sort((a, b) => {
-                const numA = parseInt(a.selectFirst("div.epnum")?.text.replace(/\D/g, '').trim() || '0');
-                const numB = parseInt(b.selectFirst("div.epnum")?.text.replace(/\D/g, '').trim() || '0');
-                return numA - numB;
-            });
-            sortedEpisodes.forEach(ep => {
-                chapters.push({ name: this._titleEdit(ep.attr("title")), url: ep.getHref });
-            });
-        } else {
-            chapters.push({ name: "مشاهدة", url: url });
-        }
-        return { name, imageUrl, description, genre, status: 1, chapters, link: url };
-    }
+    async requestDoc(path) { const url = this.source.baseUrl + path; const res = await this.client.get(url, this.getHeaders(url)); return new Document(res.body); }
+    async _parseCataloguePage(doc, isSearch = false) { const list = []; const items = doc.select("div.Block--Item, div.Small--Box"); items.forEach(item => { const linkElement = item.selectFirst("a"); if (!linkElement) return; const name = this._titleEdit(linkElement.attr("title")); let imageUrlAttr = isSearch ? "src" : "data-src"; const imageUrl = item.selectFirst("img")?.attr(imageUrlAttr); const link = linkElement.getHref; list.push({ name, imageUrl, link }); }); const hasNextPage = !!doc.selectFirst("div.pagination ul.page-numbers li a.next"); return { list, hasNextPage }; }
+    async getPopular(page) { const doc = await this.requestDoc(`/category/movies/?page=${page}`); return await this._parseCataloguePage(doc); }
+    async getLatestUpdates(page) { const doc = await this.requestDoc(`/recent/page/${page}/`); return await this._parseCataloguePage(doc); }
+    async search(query, page, filters) { let path; if (query) { path = `/?s=${encodeURIComponent(query)}&page=${page}`; } else { const categoryFilter = filters[0]; const selectedCategory = categoryFilter.values[categoryFilter.state].value; if (selectedCategory) { path = `/${selectedCategory}?page=${page}/`; } else { return this.getPopular(page); } } const doc = await this.requestDoc(path); return await this._parseCataloguePage(doc, !!query); }
+    async getDetail(url) { const doc = await this.requestDoc(url.replace(this.source.baseUrl, '')); const name = this._titleEdit(doc.selectFirst("h1.post-title")?.text || "Unknown Title"); const imageUrl = doc.selectFirst("div.left div.image img")?.getSrc; const description = doc.selectFirst("div.story")?.text.trim(); const genre = doc.select("div.catssection li a").map(e => e.text); const chapters = []; const episodeElements = doc.select("section.allepcont div.row a"); if (episodeElements.length > 0) { const sortedEpisodes = [...episodeElements].sort((a, b) => { const numA = parseInt(a.selectFirst("div.epnum")?.text.replace(/\D/g, '').trim() || '0'); const numB = parseInt(b.selectFirst("div.epnum")?.text.replace(/\D/g, '').trim() || '0'); return numA - numB; }); sortedEpisodes.forEach(ep => { chapters.push({ name: this._titleEdit(ep.attr("title")), url: ep.getHref }); }); } else { chapters.push({ name: "مشاهدة", url: url }); } return { name, imageUrl, description, genre, status: 1, chapters, link: url }; }
 
     // --- VIDEO EXTRACTION CONTROLLER ---
-    async getVideoList(url) {
-        const allStreams = [];
-        const fetchMode = this.getPreference("link_fetch_mode") || "both";
-
-        if (fetchMode === "watch" || fetchMode === "both") {
-            allStreams.push(...await this._getWatchLinks(url));
-        }
-        if (fetchMode === "download" || fetchMode === "both") {
-            allStreams.push(...await this._getDownloadLinks(url));
-        }
-
-        const uniqueStreams = Array.from(new Map(allStreams.map(item => [item.url, item])).values());
-        const preferredQuality = this.getPreference("preferred_quality") || "720";
-
-        uniqueStreams.sort((a, b) => {
-            const aPreferred = a.quality.includes(preferredQuality);
-            const bPreferred = b.quality.includes(preferredQuality);
-            if (aPreferred && !bPreferred) return -1;
-            if (!aPreferred && bPreferred) return 1;
-            return 0;
-        });
-        
-        return uniqueStreams;
-    }
-
-    // --- LINK GATHERING ---
-    async _getWatchLinks(url) {
-        const videos = [];
-        const watchUrl = url.endsWith('/') ? `${url}watch/` : `${url}/watch/`;
-        try {
-            const doc = await this.requestDoc(watchUrl.replace(this.getBaseUrl(), ''));
-            for (const serverEl of doc.select("div.watch--servers--list ul li.server--item")) {
-                await this._processLink(videos, serverEl.attr("data-link"), serverEl.text.trim());
-            }
-        } catch (e) {
-            console.error("Failed to get watch links:", e);
-        }
-        return videos;
-    }
-    
-    async _getDownloadLinks(url) {
-        const videos = [];
-        const watchUrl = url.endsWith('/') ? `${url}watch/` : `${url}/watch/`;
-        try {
-            const doc = await this.requestDoc(watchUrl.replace(this.getBaseUrl(), ''));
-            for (const downloadEl of doc.select("div.downloads a.download--item")) {
-                await this._processLink(videos, downloadEl.getHref, `[DL] ${downloadEl.selectFirst("span")?.text.trim()}`);
-            }
-        } catch (e) {
-            console.error("Failed to get download links:", e);
-        }
-        return videos;
-    }
+    async getVideoList(url) { const allStreams = []; const fetchMode = this.getPreference("link_fetch_mode") || "both"; if (fetchMode === "watch" || fetchMode === "both") { allStreams.push(...await this._getWatchLinks(url)); } if (fetchMode === "download" || fetchMode === "both") { allStreams.push(...await this._getDownloadLinks(url)); } const uniqueStreams = Array.from(new Map(allStreams.map(item => [item.url, item])).values()); const preferredQuality = this.getPreference("preferred_quality") || "720"; uniqueStreams.sort((a, b) => { const aPreferred = a.quality.includes(preferredQuality); const bPreferred = b.quality.includes(preferredQuality); if (aPreferred && !bPreferred) return -1; if (!aPreferred && bPreferred) return 1; return 0; }); return uniqueStreams; }
+    async _getWatchLinks(url) { const videos = []; const watchUrl = url.endsWith('/') ? `${url}watch/` : `${url}/watch/`; try { const doc = await this.requestDoc(watchUrl.replace(this.getBaseUrl(), '')); for (const serverEl of doc.select("div.watch--servers--list ul li.server--item")) { await this._processLink(videos, serverEl.attr("data-link"), serverEl.text.trim()); } } catch (e) { console.error("Failed to get watch links:", e); } return videos; }
+    async _getDownloadLinks(url) { const videos = []; const watchUrl = url.endsWith('/') ? `${url}watch/` : `${url}/watch/`; try { const doc = await this.requestDoc(watchUrl.replace(this.getBaseUrl(), '')); for (const downloadEl of doc.select("div.downloads a.download--item")) { await this._processLink(videos, downloadEl.getHref, `[DL] ${downloadEl.selectFirst("span")?.text.trim()}`); } } catch (e) { console.error("Failed to get download links:", e); } return videos; }
 
     // --- UNIVERSAL LINK PROCESSING ---
     async _processLink(videoList, url, prefix) {
         if (!url) return;
         
         const hosterSelection = this.getPreference("hoster_selection") || [];
+        let foundVideos = false;
         
-        try {
-            let foundVideos = false;
-            const extractor = this.extractorMap.find(ext => hosterSelection.includes(ext.key) && ext.domains.some(d => url.includes(d)));
-
-            if (extractor) {
-                const extracted = await extractor.func.call(this, url, prefix);
-                if (extracted.length > 0) {
+        // 1. Try to find a direct, optimized extractor from the user's selection
+        const primaryExtractor = this.extractorMap.find(ext => hosterSelection.includes(ext.key) && ext.domains.some(d => url.includes(d)));
+        if (primaryExtractor) {
+            try {
+                const extracted = await primaryExtractor.func.call(this, url, prefix);
+                if (extracted && extracted.length > 0) {
                     videoList.push(...extracted);
                     foundVideos = true;
                 }
-            }
+            } catch (e) { /* Primary extractor failed */ }
+        }
 
-            if (!foundVideos && this.getPreference("use_fallback_extractor")) {
-                const fallbackVideos = await this._allinoneExtractor(url, `[Fallback] ${prefix}`);
-                if (fallbackVideos.length > 0) {
-                    videoList.push(...fallbackVideos);
-                    foundVideos = true;
-                }
-            }
+        // 2. Decide if we should run the master fallback extractor
+        let runFallback = false;
+        // Condition A: The primary extractor was tried but failed, AND the user enabled the generic fallback setting.
+        if (primaryExtractor && !foundVideos && this.getPreference("use_fallback_extractor")) {
+            runFallback = true;
+        }
+        // Condition B: No primary extractor was found (it's an "Other Embed"), AND the user has "Other Embeds" selected.
+        if (!primaryExtractor && hosterSelection.includes('other')) {
+            runFallback = true;
+        }
 
-            if (!foundVideos && hosterSelection.includes('other') && !prefix.startsWith('[DL]')) {
-                let quality = `[Embed] ${prefix}`;
-                if (this.getPreference("show_embed_url_in_quality")) {
-                    quality += ` [${url}]`;
-                }
-                videoList.push({ url: url, originalUrl: url, quality: quality });
+        if (runFallback) {
+            const fallbackVideos = await this._allinoneExtractor(url, `[Fallback] ${prefix}`);
+            if (fallbackVideos && fallbackVideos.length > 0) {
+                videoList.push(...fallbackVideos);
+                foundVideos = true;
             }
-        } catch (e) {
+        }
+
+        // 3. If it was an "Other Embed" and EVERYTHING failed, push the raw link as a last resort.
+        if (!foundVideos && !primaryExtractor && hosterSelection.includes('other')) {
+            let quality = `[Embed] ${prefix}`;
             if (this.getPreference("show_embed_url_in_quality")) {
-                videoList.push({ url: "", originalUrl: url, quality: `[Debug Fail] ${prefix} [${url}]` });
+                quality += ` [${url}]`;
             }
+            videoList.push({ url: url, originalUrl: url, quality: quality });
         }
     }
 
     // --- EXTRACTOR MAP & HELPERS ---
-    extractorMap = [
-        { key: 'cybervynx', domains: ['cybervynx.com', 'smoothpre.com'], func: this._cybervynxExtractor },
-        { key: 'dood', domains: ["doodstream.com", "dood.to", "dood.so", "dood.cx", "dood.la", "dood.ws", "dood.sh", "doodstream.co", "dood.pm", "dood.wf", "dood.re", "dood.yt", "dooood.com", "dood.stream", "ds2play.com", "doods.pro", "ds2video.com", "d0o0d.com", "do0od.com", "d0000d.com", "d000d.com", "dood.li", "dood.work", "dooodster.com", "vidply.com"], func: this._doodstreamExtractor },
-        { key: 'mixdrop', domains: ["mixdrop.ps", "mixdrop.co", "mixdrop.to", "mixdrop.sx", "mixdrop.bz", "mixdrop.ch", "mixdrp.co", "mixdrp.to", "mixdrop.gl", "mixdrop.club", "mixdroop.bz", "mixdroop.co", "mixdrop.vc", "mixdrop.ag", "mdy48tn97.com", "md3b0j6hj.com", "mdbekjwqa.pw", "mdfx9dc8n.net", "mixdropjmk.pw", "mixdrop21.net", "mixdrop.is", "mixdrop.si", "mixdrop23.net", "mixdrop.nu", "mixdrop.ms", "mdzsmutpcvykb.net", "mxdrop.to"], func: this._mixdropExtractor },
-        { key: 'vidguard', domains: ['vidguard.to', 'mivalyo.com', 'listeamed.net'], func: this._vidguardExtractor },
-        { key: 'mp4upload', domains: ['mp4upload.com'], func: this._mp4uploadExtractor },
-        { key: 'voe', domains: ['voe.sx', 'kellywhatcould.com'], func: this._voeExtractor },
-        { key: 'okru', domains: ['ok.ru'], func: this._okruExtractor },
-        { key: 'vidmoly', domains: ['vidmoly.to'], func: this._vidmolyExtractor },
-        { key: 'uqload', domains: ['uqload.to', 'uqload.cx'], func: this._uqloadExtractor },
-        { key: 'vk', domains: ['vk.com'], func: this._vkExtractor },
-        { key: 'videa', domains: ['videa.hu'], func: this._videaExtractor },
-        { key: 'dailymotion', domains: ['dailymotion.com'], func: this._dailymotionExtractor },
-        { key: 'sendvid', domains: ['sendvid.com'], func: this._sendvidExtractor },
-        { key: 'streamtape', domains: ['streamtape.com', 'streamtape.cc'], func: this._streamtapeExtractor },
-        { key: 'streamwish', domains: ['streamwish.fun', 'vidhide.fun', 'filelions.to'], func: this._streamwishExtractor },
-        { key: 'filemoon', domains: ['filemoon.sx'], func: this._filemoonExtractor },
-        { key: 'vidbom', domains: ['vidbom.com'], func: this._vidbomExtractor },
-        { key: 'lulustream', domains: ['luluvdo.com'], func: this._lulustreamExtractor },
-        { key: 'streamruby', domains: ['streamruby.com'], func: this._streamrubyExtractor },
-        { key: 'upstream', domains: ['upstream.to'], func: this._upstreamExtractor },
-        { key: 'krakenfiles', domains: ['krakenfiles.com'], func: this._krakenfilesExtractor },
-        { key: 'thetube', domains: ['thetube.to'], func: this._thetubeExtractor },
-        { key: 'bigwarp', domains: ['bigwarp.net'], func: this._bigwarpExtractor },
-    ];
-    
-    _formatQuality(prefix, url, qualitySuffix = "") {
-        let quality = `${prefix} ${qualitySuffix}`.trim();
-        if (this.getPreference("show_video_url_in_quality")) {
-            quality += ` - ${url}`;
-        }
-        return quality;
-    }
-
-    async _parseM3U8(playlistUrl, prefix, headers = {}) {
-        const fallback = [{
-            url: playlistUrl,
-            originalUrl: playlistUrl,
-            quality: this._formatQuality(prefix, playlistUrl, "Auto HLS"),
-            headers
-        }];
-        
-        if (!this.getPreference("extract_m3u8_qualities", true)) {
-            return fallback;
-        }
-
-        try {
-            const masterPlaylistContent = (await this.client.get(playlistUrl, { headers })).body;
-            const regex = /#EXT-X-STREAM-INF:.*(?:RESOLUTION=(\d+x\d+)|BANDWIDTH=(\d+)).*\n(?!#)(.+)/g;
-            let match;
-            const parsedQualities = [];
-            const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1);
-
-            while ((match = regex.exec(masterPlaylistContent)) !== null) {
-                const resolution = match[1];
-                const bandwidth = match[2];
-                let qualityName = resolution ? resolution.split('x')[1] + 'p' : `${Math.round(parseInt(bandwidth) / 1000)}kbps`;
-                let streamUrl = match[3].trim();
-                if (!streamUrl.startsWith('http')) {
-                    streamUrl = baseUrl + streamUrl;
-                }
-                parsedQualities.push({
-                    url: streamUrl,
-                    originalUrl: playlistUrl, // Referer should be the master playlist
-                    quality: this._formatQuality(prefix, streamUrl, qualityName),
-                    headers
-                });
-            }
-
-            if (parsedQualities.length > 0) {
-                const finalVideos = [{ ...fallback[0] }]; // Start with the Auto option
-                finalVideos.push(...parsedQualities);
-                return finalVideos;
-            }
-            return fallback;
-        } catch (e) {
-            console.error("M3U8 Quality Parse Error:", e);
-            return fallback;
-        }
-    }
+    extractorMap = [ { key: 'cybervynx', domains: ['cybervynx.com', 'smoothpre.com'], func: this._cybervynxExtractor }, { key: 'dood', domains: ["doodstream.com", "dood.to", "dood.so", "dood.cx", "dood.la", "dood.ws", "dood.sh", "doodstream.co", "dood.pm", "dood.wf", "dood.re", "dood.yt", "dooood.com", "dood.stream", "ds2play.com", "doods.pro", "ds2video.com", "d0o0d.com", "do0od.com", "d0000d.com", "d000d.com", "dood.li", "dood.work", "dooodster.com", "vidply.com"], func: this._doodstreamExtractor }, { key: 'mixdrop', domains: ["mixdrop.ps", "mixdrop.co", "mixdrop.to", "mixdrop.sx", "mixdrop.bz", "mixdrop.ch", "mixdrp.co", "mixdrp.to", "mixdrop.gl", "mixdrop.club", "mixdroop.bz", "mixdroop.co", "mixdrop.vc", "mixdrop.ag", "mdy48tn97.com", "md3b0j6hj.com", "mdbekjwqa.pw", "mdfx9dc8n.net", "mixdropjmk.pw", "mixdrop21.net", "mixdrop.is", "mixdrop.si", "mixdrop23.net", "mixdrop.nu", "mixdrop.ms", "mdzsmutpcvykb.net", "mxdrop.to"], func: this._mixdropExtractor }, { key: 'vidguard', domains: ['vidguard.to', 'mivalyo.com', 'listeamed.net'], func: this._vidguardExtractor }, { key: 'mp4upload', domains: ['mp4upload.com'], func: this._mp4uploadExtractor }, { key: 'voe', domains: ['voe.sx', 'kellywhatcould.com'], func: this._voeExtractor }, { key: 'okru', domains: ['ok.ru'], func: this._okruExtractor }, { key: 'vidmoly', domains: ['vidmoly.to'], func: this._vidmolyExtractor }, { key: 'uqload', domains: ['uqload.to', 'uqload.cx'], func: this._uqloadExtractor }, { key: 'vk', domains: ['vk.com'], func: this._vkExtractor }, { key: 'videa', domains: ['videa.hu'], func: this._videaExtractor }, { key: 'dailymotion', domains: ['dailymotion.com'], func: this._dailymotionExtractor }, { key: 'sendvid', domains: ['sendvid.com'], func: this._sendvidExtractor }, { key: 'streamtape', domains: ['streamtape.com', 'streamtape.cc'], func: this._streamtapeExtractor }, { key: 'streamwish', domains: ['streamwish.fun', 'vidhide.fun', 'filelions.to'], func: this._streamwishExtractor }, { key: 'filemoon', domains: ['filemoon.sx'], func: this._filemoonExtractor }, { key: 'vidbom', domains: ['vidbom.com'], func: this._vidbomExtractor }, { key: 'lulustream', domains: ['luluvdo.com'], func: this._lulustreamExtractor }, { key: 'streamruby', domains: ['streamruby.com'], func: this._streamrubyExtractor }, { key: 'upstream', domains: ['upstream.to'], func: this._upstreamExtractor }, { key: 'krakenfiles', domains: ['krakenfiles.com'], func: this._krakenfilesExtractor }, { key: 'thetube', domains: ['thetube.to'], func: this._thetubeExtractor }, { key: 'bigwarp', domains: ['bigwarp.net'], func: this._bigwarpExtractor }, ];
+    _formatQuality(prefix, url, qualitySuffix = "") { let quality = `${prefix} ${qualitySuffix}`.trim(); if (this.getPreference("show_video_url_in_quality")) { quality += ` - ${url}`; } return quality; }
+    async _parseM3U8(playlistUrl, prefix, headers = {}) { const fallback = [{ url: playlistUrl, originalUrl: playlistUrl, quality: this._formatQuality(prefix, playlistUrl, "Auto HLS"), headers }]; if (!this.getPreference("extract_m3u8_qualities", true)) { return fallback; } try { const masterPlaylistContent = (await this.client.get(playlistUrl, { headers })).body; const regex = /#EXT-X-STREAM-INF:.*(?:RESOLUTION=(\d+x\d+)|BANDWIDTH=(\d+)).*\n(?!#)(.+)/g; let match; const parsedQualities = []; const baseUrl = playlistUrl.substring(0, playlistUrl.lastIndexOf('/') + 1); while ((match = regex.exec(masterPlaylistContent)) !== null) { const resolution = match[1]; const bandwidth = match[2]; let qualityName = resolution ? resolution.split('x')[1] + 'p' : `${Math.round(parseInt(bandwidth) / 1000)}kbps`; let streamUrl = match[3].trim(); if (!streamUrl.startsWith('http')) { streamUrl = baseUrl + streamUrl; } parsedQualities.push({ url: streamUrl, originalUrl: playlistUrl, quality: this._formatQuality(prefix, streamUrl, qualityName), headers }); } if (parsedQualities.length > 0) { const finalVideos = [{ ...fallback[0] }]; finalVideos.push(...parsedQualities); return finalVideos; } return fallback; } catch (e) { console.error("M3U8 Quality Parse Error:", e); return fallback; } }
 
     // --- INDIVIDUAL EXTRACTORS ---
     async _cybervynxExtractor(url, prefix) { try { const res = await this.client.get(url, this._getVideoHeaders(url)); const scriptData = res.body.match(/eval\(function\(p,a,c,k,e,d\).*\)/s)?.[0]; if (!scriptData) return []; const unpacked = unpackJs(scriptData); if (!unpacked) return []; const masterUrl = unpacked.match(/file:"([^"]+\.m3u8)"/)?.[1]; return masterUrl ? await this._parseM3U8(masterUrl, prefix, this._getVideoHeaders(url)) : []; } catch (e) { return []; } }
@@ -370,20 +147,14 @@ class DefaultExtension extends MProvider {
             const body = res.body;
             const videoHeaders = this._getVideoHeaders(url);
             let sources = [];
-            
-            // A: Combine original HTML with unpacked JS for a comprehensive search
             let potentialScripts = body;
             const packedScriptMatch = body.match(/eval\(function\(p,a,c,k,e,d\)\s?{.*}\)/);
             if (packedScriptMatch) {
                 try { potentialScripts += "\n" + unpackJs(packedScriptMatch[0]); } catch (e) {}
             }
-            
-            // B: Search for all video links in the combined content
             const urlRegex = /(https?:\/\/[^"' \s]+\.(?:m3u8|mp4|webm|mkv|mov|flv|avi))[^"' \s]*/ig;
             let match;
             while ((match = urlRegex.exec(potentialScripts)) !== null) { sources.push(match[0]); }
-            
-            // C: Process found links
             const uniqueSources = [...new Set(sources.filter(s => s && s.startsWith("http")))];
             const allVideos = [];
             for (const sourceUrl of uniqueSources) {
@@ -400,21 +171,8 @@ class DefaultExtension extends MProvider {
     }
 
     // --- FILTERS AND PREFERENCES ---
-    getFilterList() {
-        const categories = [{"name": "اختر","query": ""}, {"name": "كل الافلام","query": "category/movies-33/"}, {"name": "افلام اجنبى","query": "category/movies-33/افلام-اجنبي/"}, {"name": "افلام انمى","query": "category/anime-6/افلام-انمي/"}, {"name": "افلام تركيه","query": "category/movies-33/افلام-تركي/"}, {"name": "افلام اسيويه","query": "category/movies-33/افلام-اسيوي/"}, {"name": "افلام هنديه","query": "category/movies-33/افلام-هندى/"}, {"name": "كل المسسلسلات","query": "category/series-9/"}, {"name": "مسلسلات اجنبى","query": "category/series-9/مسلسلات-اجنبي/"}, {"name": "مسلسلات انمى","query": "category/anime-6/انمي-مترجم/"}, {"name": "مسلسلات تركى","query": "category/series-9/مسلسلات-تركي/"}, {"name": "مسلسلات اسيوى","query": "category/series-9/مسلسلات-أسيوي/"}, {"name": "مسلسلات هندى","query": "category/series-9/مسلسلات-هندي/"}];
-        return [{ type_name: "SelectFilter", name: "الأقسام", state: 0, values: categories.map(c => ({ type_name: "SelectOption", name: c.name, value: c.query })) }];
-    }
-    getSourcePreferences() {
-        return [
-            { key: "preferred_quality", listPreference: { title: "الجودة المفضلة", summary: "اختر الجودة التي سيتم اختيارها تلقائيا", valueIndex: 0, entries: ["1080p", "720p", "480p", "360p", "Auto"], entryValues: ["1080", "720", "480", "360", "Auto"], } },
-            { key: "link_fetch_mode", listPreference: { title: "طريقة جلب الروابط", summary: "اختر من أي صفحة تريد جلب الروابط", valueIndex: 0, entries: ["مشاهدة وتحميل معاً", "صفحة المشاهدة فقط", "صفحة التحميل فقط"], entryValues: ["both", "watch", "download"] } },
-            { key: "hoster_selection", multiSelectListPreference: { title: "اختر السيرفرات", summary: "اختر السيرفرات التي تريد ان تظهر", entries: ["Cybervynx/Smoothpre", "Doodstream", "Mixdrop", "Vidguard", "Mp4upload", "Voe.sx", "Ok.ru", "Vidmoly", "Uqload", "VK", "Videa", "Dailymotion", "Sendvid", "Streamtape", "Streamwish/Filelions", "Filemoon", "Vidbom", "Lulustream", "Streamruby", "Upstream", "Krakenfiles", "TheTube", "BigWarp", "Other Embeds"], entryValues: ["cybervynx", "dood", "mixdrop", "vidguard", "mp4upload", "voe", "okru", "vidmoly", "uqload", "vk", "videa", "dailymotion", "sendvid", "streamtape", "streamwish", "filemoon", "vidbom", "lulustream", "streamruby", "upstream", "krakenfiles", "thetube", "bigwarp", "other"], values: ["cybervynx", "dood", "mixdrop", "streamwish", "vidguard"], } },
-            { key: "extract_m3u8_qualities", switchPreferenceCompat: { title: "استخراج الجودات من روابط M3U8", summary: "عندما يوفر السيرفر جودات متعددة، سيتم عرضها كلها. قم بتعطيل هذا الخيار لرؤية رابط 'تلقائي' واحد فقط.", value: true, } },
-            { key: "show_video_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط الفيديو (للتصحيح)", summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة", value: false, } },
-            { key: "show_embed_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط التضمين (للتصحيح)", summary: "عرض رابط التضمين الأولي بجانب اسم الجودة", value: false, } },
-            { key: "use_fallback_extractor", switchPreferenceCompat: { title: "استخدام مستخرج احتياطي (تجريبي)", summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام", value: true, } }
-        ];
-    }
+    getFilterList() { const categories = [{"name": "اختر","query": ""}, {"name": "كل الافلام","query": "category/movies-33/"}, {"name": "افلام اجنبى","query": "category/movies-33/افلام-اجنبي/"}, {"name": "افلام انمى","query": "category/anime-6/افلام-انمي/"}, {"name": "افلام تركيه","query": "category/movies-33/افلام-تركي/"}, {"name": "افلام اسيويه","query": "category/movies-33/افلام-اسيوي/"}, {"name": "افلام هنديه","query": "category/movies-33/افلام-هندى/"}, {"name": "كل المسسلسلات","query": "category/series-9/"}, {"name": "مسلسلات اجنبى","query": "category/series-9/مسلسلات-اجنبي/"}, {"name": "مسلسلات انمى","query": "category/anime-6/انمي-مترجم/"}, {"name": "مسلسلات تركى","query": "category/series-9/مسلسلات-تركي/"}, {"name": "مسلسلات اسيوى","query": "category/series-9/مسلسلات-أسيوي/"}, {"name": "مسلسلات هندى","query": "category/series-9/مسلسلات-هندي/"}]; return [{ type_name: "SelectFilter", name: "الأقسام", state: 0, values: categories.map(c => ({ type_name: "SelectOption", name: c.name, value: c.query })) }]; }
+    getSourcePreferences() { return [ { key: "preferred_quality", listPreference: { title: "الجودة المفضلة", summary: "اختر الجودة التي سيتم اختيارها تلقائيا", valueIndex: 1, entries: ["1080p", "720p", "480p", "360p", "Auto"], entryValues: ["1080", "720", "480", "360", "Auto"], } }, { key: "link_fetch_mode", listPreference: { title: "طريقة جلب الروابط", summary: "اختر من أي صفحة تريد جلب الروابط", valueIndex: 0, entries: ["مشاهدة وتحميل معاً", "صفحة المشاهدة فقط", "صفحة التحميل فقط"], entryValues: ["both", "watch", "download"] } }, { key: "hoster_selection", multiSelectListPreference: { title: "اختر السيرفرات", summary: "اختر السيرفرات التي تريد ان تظهر", entries: ["Cybervynx/Smoothpre", "Doodstream", "Mixdrop", "Vidguard", "Mp4upload", "Voe.sx", "Ok.ru", "Vidmoly", "Uqload", "VK", "Videa", "Dailymotion", "Sendvid", "Streamtape", "Streamwish/Filelions", "Filemoon", "Vidbom", "Lulustream", "Streamruby", "Upstream", "Krakenfiles", "TheTube", "BigWarp", "Other Embeds"], entryValues: ["cybervynx", "dood", "mixdrop", "vidguard", "mp4upload", "voe", "okru", "vidmoly", "uqload", "vk", "videa", "dailymotion", "sendvid", "streamtape", "streamwish", "filemoon", "vidbom", "lulustream", "streamruby", "upstream", "krakenfiles", "thetube", "bigwarp", "other"], values: ["cybervynx", "dood", "mixdrop", "streamwish", "vidguard"], } }, { key: "extract_m3u8_qualities", switchPreferenceCompat: { title: "استخراج الجودات من روابط M3U8", summary: "عندما يوفر السيرفر جودات متعددة، سيتم عرضها كلها. قم بتعطيل هذا الخيار لرؤية رابط 'تلقائي' واحد فقط.", value: true, } }, { key: "show_video_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط الفيديو (للتصحيح)", summary: "عرض رابط الفيديو النهائي بجانب اسم الجودة", value: false, } }, { key: "show_embed_url_in_quality", switchPreferenceCompat: { title: "إظهار رابط التضمين (للتصحيح)", summary: "عرض رابط التضمين الأولي بجانب اسم الجودة", value: false, } }, { key: "use_fallback_extractor", switchPreferenceCompat: { title: "استخدام مستخرج احتياطي (تجريبي)", summary: "عندما يفشل مستخرج الفيديو الأساسي، حاول استخدام مستخرج عام", value: true, } } ]; }
 }
 
 function unpackJs(packedJS) {
