@@ -12,6 +12,8 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/en/hentaihaven.js"
 }];
 
+
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -139,38 +141,79 @@ class DefaultExtension extends MProvider {
     }
 
     async getVideoList(url) {
+        // --- Step 1: Standard video page scraping to find the initial stream URL ---
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
-        const streams = [];
 
         const iframeSrc1 = doc.selectFirst("div.player iframe")?.getSrc;
-        if (!iframeSrc1) {
-            return [];
-        }
+        if (!iframeSrc1) return [];
 
         const res1 = await this.client.get(iframeSrc1, this.getHeaders(url));
         const doc1 = new Document(res1.body);
         const playerDataId = doc1.selectFirst("li[data-id]")?.attr("data-id");
-        if (!playerDataId) {
-            return [];
-        }
+        if (!playerDataId) return [];
 
         const playerUrl = "https://nhplayer.com" + playerDataId;
         const playerRes = await this.client.get(playerUrl, this.getHeaders(iframeSrc1));
         const scriptContent = playerRes.body;
 
         const streamUrlMatch = scriptContent.match(/file:\s*['"](.*?)['"]/);
-        if (streamUrlMatch && streamUrlMatch[1]) {
-            const fullStreamUrl = streamUrlMatch[1];
-            const streamUrl = fullStreamUrl.split("?")[0];
+        if (!streamUrlMatch || !streamUrlMatch[1]) return [];
+        
+        const masterPlaylistUrl = streamUrlMatch[1];
+        const streams = [];
 
-            streams.push({
-                url: streamUrl,
-                originalUrl: streamUrl,
-                quality: "Default",
-                headers: this.getHeaders(streamUrl)
-            });
+        // --- Step 2: Check preference and parse M3U8 if applicable ---
+        if (this.getPreference("iptv_extract_qualities") && masterPlaylistUrl.toLowerCase().includes('.m3u8')) {
+            try {
+                const masterPlaylistContent = (await this.client.get(masterPlaylistUrl, this.getHeaders(masterPlaylistUrl))).body;
+                const regex = /#EXT-X-STREAM-INF:.*(?:RESOLUTION=(\d+x\d+)|BANDWIDTH=(\d+)).*\n(?!#)(.+)/g;
+                let match;
+                const parsedQualities = [];
+                const baseUrl = masterPlaylistUrl.substring(0, masterPlaylistUrl.lastIndexOf('/') + 1);
+
+                while ((match = regex.exec(masterPlaylistContent)) !== null) {
+                    const resolution = match[1];
+                    const bandwidth = match[2];
+                    let qualityName = resolution ? `${resolution.split('x')[1]}p` : `${Math.round(parseInt(bandwidth) / 1000)}kbps`;
+                    
+                    let streamUrl = match[3].trim();
+                    if (!streamUrl.startsWith('http')) {
+                        streamUrl = baseUrl + streamUrl;
+                    }
+
+                    parsedQualities.push({
+                        url: streamUrl,
+                        originalUrl: streamUrl,
+                        quality: qualityName,
+                        headers: this.getHeaders(streamUrl)
+                    });
+                }
+                
+                if (parsedQualities.length > 0) {
+                    streams.push({
+                        url: masterPlaylistUrl,
+                        originalUrl: masterPlaylistUrl,
+                        quality: `Auto (HLS)`,
+                        headers: this.getHeaders(masterPlaylistUrl)
+                    });
+                     // Sort qualities from highest to lowest
+                    parsedQualities.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
+                    streams.push(...parsedQualities);
+                    return streams;
+                }
+            } catch (e) {
+                // If parsing fails, fall through to add the default stream
+            }
         }
+
+        // --- Step 3: Fallback to default behavior ---
+        streams.push({
+            url: masterPlaylistUrl,
+            originalUrl: masterPlaylistUrl,
+            quality: "Default",
+            headers: this.getHeaders(masterPlaylistUrl)
+        });
 
         return streams;
     }
@@ -186,7 +229,15 @@ class DefaultExtension extends MProvider {
                 switchPreferenceCompat: {
                     title: "Enable 'Latest' Tab",
                     summary: "Toggles the visibility of the 'Latest' tab for this source.",
-                    value: false, // Original state was disabled
+                    value: false,
+                }
+            },
+            {
+                key: "iptv_extract_qualities",
+                switchPreferenceCompat: {
+                    title: "Enable Stream Quality Extraction",
+                    summary: "If a video provides multiple qualities (HLS/M3U8), this will list them. May not work for all videos.",
+                    value: false, // Default is disabled
                 }
             },
             {
