@@ -595,7 +595,7 @@
     },
     {
         "name": "HentaiHavenxxx",
-        "id": 16969542124,
+        "id": 169691022124,
         "baseUrl": "https://hentaihaven.xxx",
         "lang": "en",
         "typeSource": "single",
@@ -606,7 +606,7 @@
         "hasCloudflare": false,
         "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/en/hentaihavenxxx.js",
         "apiUrl": "",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "isManga": false,
         "itemType": 1,
         "isFullData": false,
