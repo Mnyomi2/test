@@ -170,7 +170,6 @@ class DefaultExtension extends MProvider {
                     parsedQualities.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
                     streams.push(...parsedQualities);
                     
-                    // Apply preferred quality setting
                     const preferredQuality = this.getPreference("preferred_quality");
                     if (preferredQuality !== "ask") {
                         if (preferredQuality === "best") {
@@ -179,13 +178,11 @@ class DefaultExtension extends MProvider {
                         if (preferredQuality === "worst") {
                             return [parsedQualities[parsedQualities.length - 1]];
                         }
-                        // Find the preferred quality or the next best
                         let targetStream = parsedQualities.find(q => q.quality.includes(preferredQuality));
                         if (!targetStream) {
                             const preferredNum = parseInt(preferredQuality);
                             targetStream = parsedQualities.find(q => parseInt(q.quality) <= preferredNum);
                         }
-                        // Fallback to best if no suitable quality found
                         if (!targetStream) {
                             targetStream = parsedQualities[0];
                         }
@@ -194,7 +191,7 @@ class DefaultExtension extends MProvider {
 
                     return streams;
                 }
-            } catch (e) { /* Fall through to default behavior */ }
+            } catch (e) { /* Fall through */ }
         }
         streams.push({ url: masterPlaylistUrl, originalUrl: masterPlaylistUrl, quality: "Default", headers: this.getHeaders(masterPlaylistUrl) });
         return streams;
@@ -234,17 +231,17 @@ class DefaultExtension extends MProvider {
                 switchPreferenceCompat: {
                     title: "Enable Stream Quality Extraction",
                     summary: "If a video provides multiple qualities (HLS/M3U8), this will list them. May not work for all videos.",
-                    value: true, // Default to true as it's a core feature now
+                    value: true,
                 }
             },
             {
                 key: "preferred_quality",
-                listPreferenceCompat: {
+                listPreference: {
                     title: "Preferred Quality",
                     summary: "Select the quality to play by default. 'Ask' will show a selection dialog if multiple are found.",
                     entries: ["Best", "Worst", "1080p", "720p", "480p", "Ask"],
                     entryValues: ["best", "worst", "1080", "720", "480", "ask"],
-                    value: "ask" // Default value
+                    valueIndex: 5
                 }
             },
             {
