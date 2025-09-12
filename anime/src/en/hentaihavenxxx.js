@@ -1,6 +1,6 @@
 const mangayomiSources = [{
     "name": "HentaiHavenxxx",
-    "id": 16969542124,
+    "id": 169691022124,
     "lang": "en",
     "baseUrl": "https://hentaihaven.xxx",
     "apiUrl": "",
@@ -8,7 +8,7 @@ const mangayomiSources = [{
     "typeSource": "single",
     "isNsfw": true,
     "itemType": 1,
-    "version": "3.0.0",
+    "version": "3.0.1",
     "pkgPath": "anime/src/en/hentaihavenxxx.js"
 }];
 
