@@ -12,6 +12,7 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/en/hentaihavenxxx.js"
 }];
 
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -25,7 +26,7 @@ class DefaultExtension extends MProvider {
     getPreference(key) {
         return new SharedPreferences().get(key);
     }
-
+    
     getBaseUrl() {
         return this.getPreference("override_base_url") || this.source.baseUrl;
     }
@@ -39,51 +40,36 @@ class DefaultExtension extends MProvider {
     }
 
     async getPopular(page) {
-        const url = page === 1 ?
-            `${this.getBaseUrl()}/?m_orderby=views` :
-            `${this.getBaseUrl()}/page/${page}/?m_orderby=views`;
+        const url = page === 1 
+            ? `${this.getBaseUrl()}/?m_orderby=views`
+            : `${this.getBaseUrl()}/page/${page}/?m_orderby=views`;
         return this.parseDirectory(url);
     }
-
+    
     async getLatestUpdates(page) {
-        const url = page === 1 ?
-            `${this.getBaseUrl()}/?m_orderby=new-manga` :
-            `${this.getBaseUrl()}/page/${page}/?m_orderby=new-manga`;
+        const url = page === 1
+            ? `${this.getBaseUrl()}/?m_orderby=new-manga`
+            : `${this.getBaseUrl()}/page/${page}/?m_orderby=new-manga`;
         return this.parseDirectory(url);
     }
 
     async search(query, page, filters) {
-        const params = [];
-        params.push(`post_type=wp-manga`);
+        const sortFilter = filters.find(f => f.name === "Sort by");
+        const sortValue = sortFilter ? sortFilter.values[sortFilter.state].value : "";
+        let url;
 
         if (query) {
-            params.push(`s=${encodeURIComponent(query)}`);
+            url = `${this.getBaseUrl()}/page/${page}/?s=${encodeURIComponent(query)}&post_type=wp-manga`;
         } else {
-            params.push(`s=`);
+            url = page === 1 
+                ? `${this.getBaseUrl()}/`
+                : `${this.getBaseUrl()}/page/${page}/`;
         }
 
-        const sortFilter = filters.find(f => f.name === "Sort by");
-        if (sortFilter) {
-            const sortValue = sortFilter.values[sortFilter.state].value;
-            if (sortValue) {
-                params.push(`m_orderby=${sortValue}`);
-            }
+        if (sortValue) {
+            url += (url.includes("?") ? "&" : "?") + `m_orderby=${sortValue}`;
         }
-
-        const genreFilter = filters.find(f => f.name === "Genres");
-        if (genreFilter) {
-            const included = genreFilter.state
-                .filter(g => g.state)
-                .map(g => `genre[]=${g.value}`);
-            if (included.length > 0) {
-                params.push(...included);
-            }
-        }
-
-        const url = page === 1 ?
-            `${this.getBaseUrl()}/?${params.join("&")}` :
-            `${this.getBaseUrl()}/page/${page}/?${params.join("&")}`;
-
+        
         return this.parseDirectory(url);
     }
 
@@ -91,15 +77,21 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
         const list = [];
-        const items = doc.select("div.page-item-detail.video");
+        const items = doc.select("div.page-item-detail");
 
         for (const item of items) {
-            const name = item.selectFirst("h3.h5 a").text.trim();
-            const link = item.selectFirst("div.item-thumb a").getHref;
-            const imageUrl = item.selectFirst("div.item-thumb img").getSrc;
-            list.push({ name, imageUrl, link });
-        }
+            const nameElement = item.selectFirst("h3.h5 a");
+            if (!nameElement) continue;
 
+            const name = nameElement.text.trim();
+            const link = nameElement.getHref;
+            const imageUrl = item.selectFirst("div.item-thumb img")?.getSrc;
+
+            if (name && link && imageUrl) {
+                list.push({ name, imageUrl, link });
+            }
+        }
+        
         const hasNextPage = doc.selectFirst("a.nextpostslink") != null;
         return { list, hasNextPage };
     }
@@ -107,35 +99,35 @@ class DefaultExtension extends MProvider {
     async getDetail(url) {
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
-
-        const name = doc.selectFirst("div.post-title h1").text.trim();
-        const imageUrl = doc.selectFirst("div.summary_image img").getSrc;
-        const descriptionText = doc.selectFirst("div.description-summary div.summary__content")?.text?.trim() ?? "";
-
-        const altTitles = doc.selectFirst(".post-content_item:has(.summary-heading:contains(Alternative)) .summary-content")?.text?.trim();
-        const description = altTitles ? `Alternative: ${altTitles}\n\n${descriptionText}` : descriptionText;
         
+        const name = doc.selectFirst("div.post-title h1").text.trim();
+        const imageUrl = doc.selectFirst("div.summary_image img")?.getSrc;
+        const description = doc.selectFirst("div.summary__content")?.text?.trim() ?? "";
         const link = url;
-        const status = 1;
+        const status = 1; // Completed
 
         const genre = [];
         const genreElements = doc.select("div.genres-content a");
         for (const element of genreElements) {
-            genre.push(element.text.trim());
+            genre.push(element.text);
         }
 
         const chapters = [];
         const episodeElements = doc.select("li.wp-manga-chapter");
-        if (episodeElements.length > 0) {
-            for (const element of episodeElements) {
-                const a = element.selectFirst("a");
-                const epName = a.text.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
-                const epUrl = a.getHref;
-                chapters.push({ name: epName, url: epUrl });
-            }
-            chapters.reverse();
-        } else {
-            chapters.push({ name: name, url: url });
+        for (const element of episodeElements) {
+            const a = element.selectFirst("a");
+            if (!a) continue;
+            
+            const dateSpanText = element.selectFirst("span.chapter-release-date")?.text ?? "";
+            const epName = a.text.replace(dateSpanText, "").trim();
+            const epUrl = a.getHref;
+            chapters.push({ name: epName, url: epUrl });
+        }
+        
+        chapters.reverse();
+
+        if (chapters.length === 0) {
+            chapters.push({ name: "Watch", url: url });
         }
 
         return { name, imageUrl, description, link, status, genre, chapters };
@@ -143,19 +135,18 @@ class DefaultExtension extends MProvider {
 
     async getVideoList(url) {
         const res = await this.client.get(url, this.getHeaders(url));
-        const body = res.body;
+        const doc = new Document(res.body);
 
-        const thumbnailUrlMatch = body.match(/<meta itemprop="thumbnailUrl" content="([^"]+)"/);
-        if (!thumbnailUrlMatch || !thumbnailUrlMatch[1]) return [];
-
-        const thumbnailUrl = thumbnailUrlMatch[1];
-        // Example: https://himg.nl/images/hh/boku-no-pico-3/poster.jpg
-        const slugMatch = thumbnailUrl.match(/\/hh\/([^\/]+)\/poster\.jpg/);
-        if (!slugMatch || !slugMatch[1]) return [];
-
-        const slug = slugMatch[1];
-        const masterPlaylistUrl = `https://master-lengs.org/api/v3/hh/${slug}/master.m3u8`;
+        const thumbnailUrl = doc.selectFirst('meta[itemprop="thumbnailUrl"]')?.attr("content");
+        if (!thumbnailUrl) return [];
         
+        const pathParts = thumbnailUrl.split('/');
+        if (pathParts.length < 2) return [];
+        
+        const identifier = pathParts[pathParts.length - 2];
+        if (!identifier) return [];
+
+        const masterPlaylistUrl = `https://master-lengs.org/api/v3/hh/${identifier}/master.m3u8`;
         const streams = [];
 
         if (this.getPreference("iptv_extract_qualities") && masterPlaylistUrl.toLowerCase().includes('.m3u8')) {
@@ -173,13 +164,37 @@ class DefaultExtension extends MProvider {
                     if (!streamUrl.startsWith('http')) streamUrl = baseUrl + streamUrl;
                     parsedQualities.push({ url: streamUrl, originalUrl: streamUrl, quality: qualityName, headers: this.getHeaders(streamUrl) });
                 }
+
                 if (parsedQualities.length > 0) {
                     streams.push({ url: masterPlaylistUrl, originalUrl: masterPlaylistUrl, quality: `Auto (HLS)`, headers: this.getHeaders(masterPlaylistUrl) });
                     parsedQualities.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
                     streams.push(...parsedQualities);
+                    
+                    // Apply preferred quality setting
+                    const preferredQuality = this.getPreference("preferred_quality");
+                    if (preferredQuality !== "ask") {
+                        if (preferredQuality === "best") {
+                            return [parsedQualities[0]];
+                        }
+                        if (preferredQuality === "worst") {
+                            return [parsedQualities[parsedQualities.length - 1]];
+                        }
+                        // Find the preferred quality or the next best
+                        let targetStream = parsedQualities.find(q => q.quality.includes(preferredQuality));
+                        if (!targetStream) {
+                            const preferredNum = parseInt(preferredQuality);
+                            targetStream = parsedQualities.find(q => parseInt(q.quality) <= preferredNum);
+                        }
+                        // Fallback to best if no suitable quality found
+                        if (!targetStream) {
+                            targetStream = parsedQualities[0];
+                        }
+                        return [targetStream];
+                    }
+
                     return streams;
                 }
-            } catch (e) { /* Fall through */ }
+            } catch (e) { /* Fall through to default behavior */ }
         }
         streams.push({ url: masterPlaylistUrl, originalUrl: masterPlaylistUrl, quality: "Default", headers: this.getHeaders(masterPlaylistUrl) });
         return streams;
@@ -187,50 +202,61 @@ class DefaultExtension extends MProvider {
 
     getFilterList() {
         const sortOptions = [
-            { name: "Relevance", value: "" },
+            { name: "Default", value: "" },
             { name: "Latest", value: "latest" },
             { name: "A-Z", value: "alphabet" },
             { name: "Rating", value: "rating" },
             { name: "Trending", value: "trending" },
-            { name: "Most Views", value: "views" }
+            { name: "Most Views", value: "views" },
         ];
-
-        const siteGenres = ["3d-hentai", "action", "adventure", "anal", "bestiality", "big-boobs", "blowjob", "bondage", "bukkake", "censored", "cheating", "comedy", "cosplay", "creampie", "dark-skin", "double-penetration", "dubbed", "futanari", "gangbang", "gender-bender", "glasses", "harem", "horror", "incest", "inflation", "lactation", "loli", "maid", "masturbation", "milf", "mind-break", "mind-control", "monster", "neko", "ntr", "nurse", "orgy", "pov", "pregnant", "public-sex", "rape", "reverse-rape", "school-girl", "scat", "shota", "softcore", "straight", "succubus", "tentacles", "threesome", "trap", "tsundere", "ugly-bastard", "uncensored", "vanilla", "virgin", "x-ray", "yaoi", "yuri"];
-
-        const c = (name, value) => ({ type_name: "CheckBox", name, value });
-        const toDisplayName = (str) => str.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-        const genreCheckFilters = siteGenres.map(g => c(toDisplayName(g), g));
-
         return [
-            { type_name: "SelectFilter", name: "Sort by", state: 0, values: sortOptions.map(s => ({ type_name: "SelectOption", name: s.name, value: s.value })) },
-            { type_name: "GroupFilter", name: "Genres", state: genreCheckFilters },
+            { 
+                type_name: "SelectFilter", 
+                name: "Sort by", 
+                state: 0, 
+                values: sortOptions.map(s => ({ type_name: "SelectOption", name: s.name, value: s.value })) 
+            },
         ];
     }
 
     getSourcePreferences() {
-        return [{
-            key: "enable_latest_tab",
-            switchPreferenceCompat: {
-                title: "Enable 'Latest' Tab",
-                summary: "Toggles the visibility of the 'Latest' tab for this source.",
-                value: true,
+        return [
+            {
+                key: "enable_latest_tab",
+                switchPreferenceCompat: {
+                    title: "Enable 'Latest' Tab",
+                    summary: "Toggles the visibility of the 'Latest' tab for this source.",
+                    value: true,
+                }
+            },
+            {
+                key: "iptv_extract_qualities",
+                switchPreferenceCompat: {
+                    title: "Enable Stream Quality Extraction",
+                    summary: "If a video provides multiple qualities (HLS/M3U8), this will list them. May not work for all videos.",
+                    value: true, // Default to true as it's a core feature now
+                }
+            },
+            {
+                key: "preferred_quality",
+                listPreferenceCompat: {
+                    title: "Preferred Quality",
+                    summary: "Select the quality to play by default. 'Ask' will show a selection dialog if multiple are found.",
+                    entries: ["Best", "Worst", "1080p", "720p", "480p", "Ask"],
+                    entryValues: ["best", "worst", "1080", "720", "480", "ask"],
+                    value: "ask" // Default value
+                }
+            },
+            {
+                key: "override_base_url",
+                editTextPreference: {
+                    title: "Override Base URL",
+                    summary: "Use a different mirror/domain for the source",
+                    value: this.source.baseUrl,
+                    dialogTitle: "Enter new Base URL",
+                    dialogMessage: "",
+                }
             }
-        }, {
-            key: "iptv_extract_qualities",
-            switchPreferenceCompat: {
-                title: "Enable Stream Quality Extraction",
-                summary: "If a video provides multiple qualities (HLS/M3U8), this will list them. May not work for all videos.",
-                value: false,
-            }
-        }, {
-            key: "override_base_url",
-            editTextPreference: {
-                title: "Override Base URL",
-                summary: "Use a different mirror/domain for the source",
-                value: this.source.baseUrl,
-                dialogTitle: "Enter new Base URL",
-                dialogMessage: "",
-            }
-        }];
+        ];
     }
 }
