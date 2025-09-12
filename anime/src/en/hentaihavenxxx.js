@@ -241,7 +241,7 @@ class DefaultExtension extends MProvider {
                     summary: "Select the quality to play by default. 'Ask' will show a selection dialog if multiple are found.",
                     entries: ["Best", "Worst", "1080p", "720p", "480p", "Ask"],
                     entryValues: ["best", "worst", "1080", "720", "480", "ask"],
-                    valueIndex: 5
+                    valueIndex: 0
                 }
             },
             {
