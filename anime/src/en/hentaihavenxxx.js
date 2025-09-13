@@ -12,7 +12,6 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/en/hentaihavenxxx.js"
 }];
 
-
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -57,65 +56,83 @@ class DefaultExtension extends MProvider {
         const baseUrl = this.getBaseUrl();
         const sortFilter = filters.find(f => f.name === "Sort by");
         const sortValue = sortFilter ? sortFilter.values[sortFilter.state].value : "";
-        let url;
+        
+        let path;
+        const params = [];
 
         if (query) {
-            // Text search logic: Ignores Genre/Tag filters.
-            const pagePath = page > 1 ? `page/${page}/` : '';
-            url = `${baseUrl}/${pagePath}`;
-
-            const params = [];
+            path = page > 1 ? `/page/${page}/` : `/`;
             params.push(`s=${encodeURIComponent(query)}`);
-            if (sortValue) {
-                params.push(`m_orderby=${sortValue}`);
-            }
-            url += `?${params.join('&')}`;
-
+            params.push(`post_type=wp-manga`);
         } else {
-            // Filter browsing logic (no text query)
             const genreFilter = filters.find(f => f.name === "Genre (Series)");
             const tagFilter = filters.find(f => f.name === "Tag");
-            const genreValue = genreFilter && genreFilter.state > 0 ? genreFilter.values[genreFilter.state].value : "";
-            const tagValue = tagFilter && tagFilter.state > 0 ? tagFilter.values[tagFilter.state].value : "";
 
-            let path = "/";
-            if (genreValue) {
-                path = `/series/${genreValue}/`;
-            } else if (tagValue) {
-                path = `/tag/${tagValue}/`;
+            let filterPath = "/";
+            if (genreFilter && genreFilter.state > 0) {
+                const genreValue = genreFilter.values[genreFilter.state].value;
+                filterPath = `/series/${genreValue}/`;
+            } else if (tagFilter && tagFilter.state > 0) {
+                const tagValue = tagFilter.values[tagFilter.state].value;
+                filterPath = `/tag/${tagValue}/`;
             }
+            
+            path = page > 1 ? `${filterPath}page/${page}/` : filterPath;
+        }
 
-            const pagePath = page > 1 ? `page/${page}/` : '';
-            url = `${baseUrl}${path}${pagePath}`;
-
-            if (sortValue) {
-                url += `?m_orderby=${sortValue}`;
-            }
+        if (sortValue) {
+            params.push(`m_orderby=${sortValue}`);
         }
         
-        return this.parseDirectory(url);
+        let finalUrl = `${baseUrl}${path}`;
+        if (params.length > 0) {
+            finalUrl += `?${params.join('&')}`;
+        }
+        
+        return this.parseDirectory(finalUrl);
     }
 
     async parseDirectory(url) {
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
         const list = [];
-        const items = doc.select("div.page-item-detail");
+        
+        // Try selector for browse/filter pages first
+        let items = doc.select("div.page-item-detail");
 
-        for (const item of items) {
-            const nameElement = item.selectFirst("h3.h5 a");
-            if (!nameElement) continue;
+        if (items.length > 0) {
+            // Logic for Browse/Filter pages
+            for (const item of items) {
+                const nameElement = item.selectFirst("h3.h5 a");
+                if (!nameElement) continue;
 
-            const name = nameElement.text.trim();
-            const link = nameElement.getHref;
-            const imageUrl = item.selectFirst("div.item-thumb img")?.getSrc;
+                const name = nameElement.text.trim();
+                const link = nameElement.getHref;
+                const imageUrl = item.selectFirst("div.item-thumb img")?.getSrc;
 
-            if (name && link && imageUrl) {
-                list.push({ name, imageUrl, link });
+                if (name && link && imageUrl) {
+                    list.push({ name, imageUrl, link });
+                }
+            }
+        } else {
+            // Fallback for Search results page
+            items = doc.select("div.c-tabs-item__content");
+            for (const item of items) {
+                const a = item.selectFirst("div.tab-thumb a");
+                if (!a) continue;
+
+                const name = a.attr("title").trim();
+                const link = a.getHref;
+                const imageUrl = a.selectFirst("img")?.getSrc;
+                
+                if (name && link && imageUrl) {
+                    list.push({ name, imageUrl, link });
+                }
             }
         }
         
-        const hasNextPage = doc.selectFirst("a.nextpostslink") != null;
+        // Robust "next page" check for both layouts
+        const hasNextPage = doc.selectFirst("a.nextpostslink, a.next.page-numbers") != null;
         return { list, hasNextPage };
     }
 
@@ -276,7 +293,8 @@ class DefaultExtension extends MProvider {
         const tagOptions = [{ type_name: "SelectOption", name: "Any", value: "" }, ...tags.sort((a, b) => a.name.localeCompare(b.name)).map(toOption)];
 
         return [
-            { type_name: "HeaderFilter", name: "Note: When searching with text, Genre/Tag filters are ignored." },
+            { type_name: "HeaderFilter", name: "NOTE: Text search overrides Genre/Tag filters." },
+            { type_name: "HeaderFilter", name: "Only one category filter (Genre or Tag) can be used." },
             { 
                 type_name: "SelectFilter", name: "Sort by", state: 0, 
                 values: sortOptions.map(s => ({ type_name: "SelectOption", name: s.name, value: s.value })) 
