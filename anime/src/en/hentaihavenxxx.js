@@ -54,20 +54,43 @@ class DefaultExtension extends MProvider {
     }
 
     async search(query, page, filters) {
+        const baseUrl = this.getBaseUrl();
         const sortFilter = filters.find(f => f.name === "Sort by");
         const sortValue = sortFilter ? sortFilter.values[sortFilter.state].value : "";
         let url;
 
         if (query) {
-            url = `${this.getBaseUrl()}/page/${page}/?s=${encodeURIComponent(query)}&post_type=wp-manga`;
-        } else {
-            url = page === 1 
-                ? `${this.getBaseUrl()}/`
-                : `${this.getBaseUrl()}/page/${page}/`;
-        }
+            // Text search logic: Ignores Genre/Tag filters.
+            const pagePath = page > 1 ? `page/${page}/` : '';
+            url = `${baseUrl}/${pagePath}`;
 
-        if (sortValue) {
-            url += (url.includes("?") ? "&" : "?") + `m_orderby=${sortValue}`;
+            const params = [];
+            params.push(`s=${encodeURIComponent(query)}`);
+            if (sortValue) {
+                params.push(`m_orderby=${sortValue}`);
+            }
+            url += `?${params.join('&')}`;
+
+        } else {
+            // Filter browsing logic (no text query)
+            const genreFilter = filters.find(f => f.name === "Genre (Series)");
+            const tagFilter = filters.find(f => f.name === "Tag");
+            const genreValue = genreFilter && genreFilter.state > 0 ? genreFilter.values[genreFilter.state].value : "";
+            const tagValue = tagFilter && tagFilter.state > 0 ? tagFilter.values[tagFilter.state].value : "";
+
+            let path = "/";
+            if (genreValue) {
+                path = `/series/${genreValue}/`;
+            } else if (tagValue) {
+                path = `/tag/${tagValue}/`;
+            }
+
+            const pagePath = page > 1 ? `page/${page}/` : '';
+            url = `${baseUrl}${path}${pagePath}`;
+
+            if (sortValue) {
+                url += `?m_orderby=${sortValue}`;
+            }
         }
         
         return this.parseDirectory(url);
@@ -107,9 +130,9 @@ class DefaultExtension extends MProvider {
         const status = 1; // Completed
 
         const genre = [];
-        const genreElements = doc.select("div.genres-content a");
+        const genreElements = doc.select("div.genres-content a, div#init-links a.tag_btn");
         for (const element of genreElements) {
-            genre.push(element.text);
+            genre.push(element.text.trim());
         }
 
         const chapters = [];
@@ -147,8 +170,7 @@ class DefaultExtension extends MProvider {
         if (!identifier) return [];
 
         const masterPlaylistUrl = `https://master-lengs.org/api/v3/hh/${identifier}/master.m3u8`;
-        const streams = [];
-
+        
         if (this.getPreference("iptv_extract_qualities") && masterPlaylistUrl.toLowerCase().includes('.m3u8')) {
             try {
                 const masterPlaylistContent = (await this.client.get(masterPlaylistUrl, this.getHeaders(masterPlaylistUrl))).body;
@@ -166,53 +188,101 @@ class DefaultExtension extends MProvider {
                 }
 
                 if (parsedQualities.length > 0) {
-                    streams.push({ url: masterPlaylistUrl, originalUrl: masterPlaylistUrl, quality: `Auto (HLS)`, headers: this.getHeaders(masterPlaylistUrl) });
                     parsedQualities.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
-                    streams.push(...parsedQualities);
                     
                     const preferredQuality = this.getPreference("preferred_quality");
                     if (preferredQuality !== "ask") {
+                        let targetStream;
                         if (preferredQuality === "best") {
-                            return [parsedQualities[0]];
+                            // Already sorted
+                        } else if (preferredQuality === "worst") {
+                            targetStream = parsedQualities[parsedQualities.length - 1];
+                        } else {
+                            targetStream = parsedQualities.find(q => q.quality.includes(preferredQuality));
+                            if (!targetStream) {
+                                const preferredNum = parseInt(preferredQuality);
+                                targetStream = parsedQualities.find(q => parseInt(q.quality) <= preferredNum);
+                            }
                         }
-                        if (preferredQuality === "worst") {
-                            return [parsedQualities[parsedQualities.length - 1]];
+
+                        if (targetStream) {
+                            const index = parsedQualities.indexOf(targetStream);
+                            if (index > 0) {
+                                const [item] = parsedQualities.splice(index, 1);
+                                parsedQualities.unshift(item);
+                            }
                         }
-                        let targetStream = parsedQualities.find(q => q.quality.includes(preferredQuality));
-                        if (!targetStream) {
-                            const preferredNum = parseInt(preferredQuality);
-                            targetStream = parsedQualities.find(q => parseInt(q.quality) <= preferredNum);
-                        }
-                        if (!targetStream) {
-                            targetStream = parsedQualities[0];
-                        }
-                        return [targetStream];
                     }
 
-                    return streams;
+                    const finalStreams = [...parsedQualities];
+                    finalStreams.push({ url: masterPlaylistUrl, originalUrl: masterPlaylistUrl, quality: `Auto (HLS)`, headers: this.getHeaders(masterPlaylistUrl) });
+                    return finalStreams;
                 }
             } catch (e) { /* Fall through */ }
         }
-        streams.push({ url: masterPlaylistUrl, originalUrl: masterPlaylistUrl, quality: "Default", headers: this.getHeaders(masterPlaylistUrl) });
-        return streams;
+        
+        return [{ url: masterPlaylistUrl, originalUrl: masterPlaylistUrl, quality: "Default", headers: this.getHeaders(masterPlaylistUrl) }];
     }
 
     getFilterList() {
         const sortOptions = [
-            { name: "Default", value: "" },
-            { name: "Latest", value: "latest" },
-            { name: "A-Z", value: "alphabet" },
-            { name: "Rating", value: "rating" },
-            { name: "Trending", value: "trending" },
-            { name: "Most Views", value: "views" },
+            { name: "Default", value: "" }, { name: "Latest", value: "latest" },
+            { name: "A-Z", value: "alphabet" }, { name: "Rating", value: "rating" },
+            { name: "Trending", value: "trending" }, { name: "Views", value: "views" },
+            { name: "New", value: "new-manga" },
         ];
+        
+        const genres = [
+            { name: '3D Hentai', value: '3d-hentai' }, { name: 'Anal', value: 'anal' }, { name: 'BBW', value: 'bbw' },
+            { name: 'BDSM', value: 'bdsm' }, { name: 'Ecchi', value: 'ecchi' }, { name: 'FemBoy', value: 'femboy' },
+            { name: 'Femdom', value: 'femdom' }, { name: 'Furry', value: 'furry' }, { name: 'Futanari', value: 'futanari' },
+            { name: 'Gender Bender Hentai', value: 'gender-bender-hentai' }, { name: 'Harem', value: 'harem' },
+            { name: 'Hentai School', value: 'hentai-school' }, { name: 'Horror', value: 'horror' },
+            { name: 'Incest Hentai', value: 'incest' }, { name: 'Milf', value: 'milf' }, { name: 'Monster', value: 'monster' },
+            { name: 'Romance', value: 'romance' }, { name: 'Softcore', value: 'softcore' },
+            { name: 'Teen Hentai', value: 'teen-hentai' }, { name: 'Tentacle', value: 'tentacle' },
+            { name: 'Tsundere', value: 'tsundere' }, { name: 'Umemaro 3D', value: 'umemaro-3d' },
+            { name: 'Uncensored Hentai', value: 'uncensored' }, { name: 'Yaoi', value: 'yaoi' },
+            { name: 'Young Hentai', value: 'young' }, { name: 'Yuri', value: 'yuri' }
+        ];
+
+        const tags = [
+            { name: 'Anime Hentai', value: 'anime-hentai' }, { name: 'Anime Porn', value: 'anime-porn' },
+            { name: 'Big Boobs', value: 'big-boobs' }, { name: 'Big Tits Hentai', value: 'big-tits' },
+            { name: 'Blow Job', value: 'blow-job' }, { name: 'Censored', value: 'censored' },
+            { name: 'Creampie', value: 'creampie' }, { name: 'Cum in Pussy', value: 'cum-in-pussy' },
+            { name: 'eHentai', value: 'ehentai' }, { name: 'e Hentai', value: 'e-hentai' },
+            { name: 'Free Hentai', value: 'free-hentai' }, { name: 'ge Hentai', value: 'ge-hentai' },
+            { name: 'Gelbooru', value: 'gelbooru' }, { name: 'Hanime', value: 'hanime' }, { name: 'Hanime TV', value: 'hanime-tv' },
+            { name: 'HD', value: 'hd' }, { name: 'Hentai', value: 'hentai' }, { name: 'Hentai Anime', value: 'hentai-anime' },
+            { name: 'Hentai Chan', value: 'hentai-chan' }, { name: 'HentaiCity', value: 'hentaicity' },
+            { name: 'HentaiCore', value: 'hentaicore' }, { name: 'HentaiDude', value: 'hentaidude' },
+            { name: 'Hentai Foundry', value: 'hentai-foundry' }, { name: 'HentaiFreak', value: 'hentaifreak' },
+            { name: 'Hentai Haven', value: 'hentai-haven' }, { name: 'Hentai Manga', value: 'hentai-manga' },
+            { name: 'Hentai Porn', value: 'hentai-porn' }, { name: 'Hentai Stream', value: 'hentai-stream' },
+            { name: 'Hentai TV', value: 'hentai-tv' }, { name: 'Hentai Vid', value: 'hentai-vid' },
+            { name: 'Hentai Video', value: 'hentai-video' }, { name: 'Hentai Videos', value: 'hentai-videos' },
+            { name: 'Masturbation', value: 'masturbation' }, { name: 'mp4Hentai', value: 'mp4hentai' },
+            { name: 'Naughty Hentai', value: 'naughty-hentai' }, { name: 'nHentai', value: 'n-hentai' },
+            { name: 'oHentai', value: 'ohentai' }, { name: 'Oral Sex', value: 'oral-sex' }, { name: 'Orgasm', value: 'orgasm' },
+            { name: 'Rule 34', value: 'rule-34' }, { name: 'Sexy', value: 'sexy' }, { name: 'Tits', value: 'tits' },
+            { name: 'Watch Hentai', value: 'watch-hentai' }, { name: 'xAnimePorn', value: 'xanimeporn' },
+            { name: 'xHentai', value: 'xhentai' }
+        ];
+
+        const toOption = (item) => ({ type_name: "SelectOption", name: item.name, value: item.value });
+
+        const genreOptions = [{ type_name: "SelectOption", name: "Any", value: "" }, ...genres.sort((a, b) => a.name.localeCompare(b.name)).map(toOption)];
+        const tagOptions = [{ type_name: "SelectOption", name: "Any", value: "" }, ...tags.sort((a, b) => a.name.localeCompare(b.name)).map(toOption)];
+
         return [
+            { type_name: "HeaderFilter", name: "Note: When searching with text, Genre/Tag filters are ignored." },
             { 
-                type_name: "SelectFilter", 
-                name: "Sort by", 
-                state: 0, 
+                type_name: "SelectFilter", name: "Sort by", state: 0, 
                 values: sortOptions.map(s => ({ type_name: "SelectOption", name: s.name, value: s.value })) 
             },
+            { type_name: "SelectFilter", name: "Genre (Series)", state: 0, values: genreOptions },
+            { type_name: "SelectFilter", name: "Tag", state: 0, values: tagOptions },
         ];
     }
 
@@ -238,7 +308,7 @@ class DefaultExtension extends MProvider {
                 key: "preferred_quality",
                 listPreference: {
                     title: "Preferred Quality",
-                    summary: "Select the quality to play by default. 'Ask' will show a selection dialog if multiple are found.",
+                    summary: "Select the quality to play by default. All other qualities will still be available.",
                     entries: ["Best", "Worst", "1080p", "720p", "480p", "Ask"],
                     entryValues: ["best", "worst", "1080", "720", "480", "ask"],
                     valueIndex: 0
