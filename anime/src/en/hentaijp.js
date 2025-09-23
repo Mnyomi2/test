@@ -19,28 +19,6 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/en/hentaijp.js"
 }];
 
-// ------------  NEW CONSTANTS FOR HENTAI.JP  ------------
-const ORDERS = [
-    ["Most Recent", "mr"],
-    ["Most Viewed", "mv"],
-    ["Most Liked", "tf"],
-    ["Most Discussed", "md"]
-];
-
-// A selection of popular tags with their IDs from the site.
-// Format: ["Display Name", "ID"]
-const TAGS = [
-    ["3D", "1"], ["Ahegao", "5"], ["Anal", "7"], ["Big Boobs", "10"], ["Blowjob", "11"],
-    ["Bondage", "12"], ["Cosplay", "17"], ["Creampie", "18"], ["Dark Skin", "19"], ["Deepthroat", "20"],
-    ["Facial", "25"], ["Fantasy", "26"], ["Femdom", "27"], ["Futanari", "32"], ["Gangbang", "33"],
-    ["Glasses", "34"], ["Handjob", "36"], ["Harem", "37"], ["Incest", "39"], ["Loli", "43"],
-    ["Maid", "44"], ["Masturbation", "45"], ["Milf", "46"], ["Mind Control", "48"], ["Monster Girl", "49"],
-    ["Nakadashi", "50"], ["Netorare", "52"], ["Nurse", "55"], ["Orgy", "56"], ["Paizuri", "57"],
-    ["Pregnant", "60"], ["Rape", "62"], ["Schoolgirl", "64"], ["Sex Toys", "66"], ["Shota", "67"],
-    ["Tentacles", "73"], ["Threesome", "74"], ["Tsundere", "76"], ["Ugly Bastard", "77"], ["Uncensored", "78"],
-    ["X-ray", "82"], ["Yaoi", "83"], ["Yuri", "84"]
-];
-// ----------------------------------------------------
 
 class DefaultExtension extends MProvider {
     constructor() {
@@ -61,19 +39,17 @@ class DefaultExtension extends MProvider {
         const baseUrl = this.getBaseUrl();
         return {
             "Referer": referer || baseUrl,
-            "Origin": baseUrl
         };
     }
 
-    // Parses a video item from a list page (popular, latest, search)
+    // Parses a video item from the new <article> structure
     _parseAnimeFromElement(element) {
-        const linkElement = element.selectFirst("a.video-item__link-overlay");
-        const imgElement = element.selectFirst("img.video-item__img");
+        const linkElement = element.selectFirst("a");
+        const imgElement = element.selectFirst("img.display-img");
 
-        const name = imgElement.attr("alt");
-        const link = linkElement.getHref; // This is a full URL, we need the relative path
-        const relativeLink = link.replace(this.getBaseUrl(), "");
-        const imageUrl = imgElement.getSrc;
+        const name = linkElement.attr("data-title");
+        const relativeLink = linkElement.getHref.replace(this.getBaseUrl(), "");
+        const imageUrl = imgElement.getSrc || imgElement.attr("data-src");
 
         return { name, imageUrl, link: relativeLink };
     }
@@ -82,48 +58,28 @@ class DefaultExtension extends MProvider {
         const baseUrl = this.getBaseUrl();
         const res = await this.client.get(baseUrl + path, this.getHeaders());
         const doc = new Document(res.body);
-
-        const list = doc.select("div.video-item").map(el => this._parseAnimeFromElement(el));
-        const hasNextPage = !!doc.selectFirst("a[rel=next]");
+        
+        const list = doc.select("article.thumb-block").map(el => this._parseAnimeFromElement(el));
+        const hasNextPage = !!doc.selectFirst("a.nextpostslink");
         return { list, hasNextPage };
     }
 
     async getPopular(page) {
-        // 'mv' is for 'Most Viewed'
-        return this._getAnimePage(`/videos/?o=mv&p=${page}`);
+        // "Popular" on this site is "Most Viewed"
+        const path = page === 1 ? "/most-viewed/" : `/most-viewed/page/${page}/`;
+        return this._getAnimePage(path);
     }
 
     async getLatestUpdates(page) {
-        // 'mr' is for 'Most Recent'
-        return this._getAnimePage(`/videos/?o=mr&p=${page}`);
+        // The homepage is page 1 of latest.
+        const path = page === 1 ? "/" : `/page/${page}/`;
+        return this._getAnimePage(path);
     }
 
     async search(query, page, filters) {
-        const getCheckBoxValues = (state) => state.filter(i => i.state).map(i => i.value);
-        const getSelectValue = (filter) => filter.values[filter.state].value;
-
-        let params = new URLSearchParams();
-        params.set("p", page.toString());
-
-        if (query) {
-            params.set("q", query);
-        }
-
-        if (filters && filters.length > 0) {
-            const order = getSelectValue(filters[0]);
-            params.set("o", order);
-
-            const includedTags = getCheckBoxValues(filters[1].state);
-            includedTags.forEach(tagId => params.append("tag_ids[]", tagId));
-        }
-
-        const url = `${this.getBaseUrl()}/videos/?${params.toString()}`;
-        
-        const res = await this.client.get(url, this.getHeaders());
-        const doc = new Document(res.body);
-        const list = doc.select("div.video-item").map(el => this._parseAnimeFromElement(el));
-        const hasNextPage = !!doc.selectFirst("a[rel=next]");
-        return { list, hasNextPage };
+        // This site uses a simple query parameter for search.
+        const path = page === 1 ? `/?s=${encodeURIComponent(query)}` : `/page/${page}/?s=${encodeURIComponent(query)}`;
+        return this._getAnimePage(path);
     }
 
     async getDetail(url) {
@@ -132,16 +88,17 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(pageUrl, this.getHeaders());
         const doc = new Document(res.body);
 
-        const name = doc.selectFirst("h1.video-title").text.trim();
+        const name = doc.selectFirst("h1.entry-title").text.trim();
         const imageUrl = doc.selectFirst("meta[property='og:image']").attr("content");
-        const description = doc.selectFirst("div.video-description")?.text.trim() || "No description available.";
-        const genre = doc.select("div.tag-list__item a").map(el => el.text.trim());
-        const status = 1; // Completed, since each entry is a single video
+        const description = doc.selectFirst("div.entry-content")?.text.trim() || "No description available.";
+        // Tags are inside a span with links
+        const genre = doc.select("span.entry-cats a").map(el => el.text.trim());
+        const status = 1; // Completed
 
-        // Since each entry is a single video, we treat it as a "series" with one "chapter".
+        // Each post is a single video, so we create one "chapter"
         const chapters = [{
-            name: name, // The chapter name is the video title
-            url: url    // The url to get videos is the same detail page url
+            name: name,
+            url: url
         }];
 
         return {
@@ -157,24 +114,46 @@ class DefaultExtension extends MProvider {
 
     async getVideoList(url) {
         const baseUrl = this.getBaseUrl();
-        const episodePageUrl = baseUrl + url;
-        const res = await this.client.get(episodePageUrl, this.getHeaders(episodePageUrl));
-        const doc = new Document(res.body);
+        const pageUrl = baseUrl + url;
 
-        const videoElements = doc.select("video#video-player > source");
-        if (videoElements.length === 0) {
-            throw new Error("No video sources found on the page.");
+        // Step 1: Get the main page to find the iframe URL
+        const mainRes = await this.client.get(pageUrl, this.getHeaders(baseUrl));
+        const mainDoc = new Document(mainRes.body);
+
+        // The video is in an iframe from a domain like vanfem.com
+        const iframeElement = mainDoc.selectFirst('iframe[src*="vanfem.com"], iframe[src*="guccihide.com"]');
+        if (!iframeElement) {
+            throw new Error("Could not find the video iframe on the page.");
+        }
+        const iframeUrl = iframeElement.getSrc;
+
+        // Step 2: Get the iframe page content
+        const iframeRes = await this.client.get(iframeUrl, this.getHeaders(pageUrl));
+        const iframeDoc = new Document(iframeRes.body);
+
+        // Step 3: Extract the video sources from the script in the iframe page
+        const scriptElement = iframeDoc.selectFirst("script:contains(jwplayer(\"player\").setup)");
+        if (!scriptElement) {
+            throw new Error("Could not find video player configuration script in the iframe.");
         }
 
-        let videos = videoElements.map(el => {
-            const videoUrl = el.getSrc;
-            const quality = `${el.attr("size")}p`; // e.g., "1080p", "720p"
-            return {
-                url: videoUrl,
-                originalUrl: videoUrl,
-                quality: quality,
-            };
-        });
+        const scriptContent = scriptElement.text;
+        const sourcesRegex = /sources:\s*(\[.*?\])/s;
+        const match = scriptContent.match(sourcesRegex);
+
+        if (!match || match.length < 2) {
+            throw new Error("Could not extract video sources from the script.");
+        }
+
+        // The extracted string might not be perfect JSON, so we clean it up
+        let sourcesJson = match[1].replace(/'/g, '"'); // Replace single quotes with double quotes
+        const sourcesArray = JSON.parse(sourcesJson);
+
+        let videos = sourcesArray.map(source => ({
+            url: source.file,
+            originalUrl: source.file,
+            quality: source.label || "Default",
+        }));
 
         const showPreferredOnly = this.getPreference("enable_preferred_quality_only") ?? true;
 
@@ -186,22 +165,15 @@ class DefaultExtension extends MProvider {
             }
         }
         
-        // Sort from highest to lowest quality
         videos.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
         return videos;
     }
 
     getFilterList() {
-        const g = (name, value) => ({ type_name: "CheckBox", name, value });
-        const f = (name, value) => ({ type_name: "SelectOption", name, value });
-
-        const tags = TAGS.map(([name, value]) => g(name, value));
-        const orders = ORDERS.map(([name, value]) => f(name, value));
-
-        return [
-            { type_name: "SelectFilter", name: "Sort by", state: 0, values: orders },
-            { type_name: "GroupFilter", name: "Tags", state: tags },
-        ];
+        // This site's search doesn't support filters/tags alongside keyword search.
+        // It's either search by keyword OR browse by category.
+        // Therefore, we return an empty list.
+        return [];
     }
 
     getSourcePreferences() {
@@ -221,9 +193,9 @@ class DefaultExtension extends MProvider {
                 listPreference: {
                     title: "Preferred quality",
                     summary: "Note: Not all videos have all qualities available.",
-                    valueIndex: 0, // Default to 1080p
-                    entries: ["1080p", "720p", "480p", "360p"],
-                    entryValues: ["1080p", "720p", "480p", "360p"]
+                    valueIndex: 0,
+                    entries: ["1080p", "720p", "480p", "360p", "Default"],
+                    entryValues: ["1080p", "720p", "480p", "360p", "Default"]
                 }
             },
             {
