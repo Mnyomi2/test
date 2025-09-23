@@ -1,11 +1,3 @@
-// ==Mangayomi==
-// @name         Hentai JP
-// @version      1.0.0
-// @description  Hentai JP extension
-// @author       Don
-// @site         https://hentai.jp
-// ==/Mangayomi==
-
 const mangayomiSources = [{
     "name": "Hentai JP",
     "id": 8172938104,
@@ -19,193 +11,261 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/en/hentaijp.js"
 }];
 
-
 class DefaultExtension extends MProvider {
     constructor() {
         super();
         this.client = new Client();
     }
 
-    getPreference(key) {
-        return new SharedPreferences().get(key);
-    }
-
-    getBaseUrl() {
-        const overrideUrl = this.getPreference("override_base_url");
-        return (overrideUrl || "").trim() || this.source.baseUrl.trim();
-    }
-
     getHeaders(referer) {
-        const baseUrl = this.getBaseUrl();
+        const baseUrl = this.source.baseUrl;
         return {
             "Referer": referer || baseUrl,
+            "Origin": baseUrl
         };
     }
 
-    // Parses a video item from the new <article> structure
-    _parseAnimeFromElement(element) {
-        const linkElement = element.selectFirst("a");
-        const imgElement = element.selectFirst("img.display-img");
-
-        const name = linkElement.attr("data-title");
-        const relativeLink = linkElement.getHref.replace(this.getBaseUrl(), "");
-        const imageUrl = imgElement.getSrc || imgElement.attr("data-src");
-
-        return { name, imageUrl, link: relativeLink };
-    }
-
-    async _getAnimePage(path) {
-        const baseUrl = this.getBaseUrl();
-        const res = await this.client.get(baseUrl + path, this.getHeaders());
+    // A helper function to parse anime list pages (popular, latest, search)
+    async _getAnimePage(url) {
+        const res = await this.client.get(url, this.getHeaders());
         const doc = new Document(res.body);
-        
-        const list = doc.select("article.thumb-block").map(el => this._parseAnimeFromElement(el));
-        const hasNextPage = !!doc.selectFirst("a.nextpostslink");
+        const baseUrl = this.source.baseUrl;
+
+        const seriesMap = new Map();
+        doc.select("article.thumb-block").forEach(el => {
+            const a = el.selectFirst("a");
+            if (!a) return;
+
+            const fullName = a.attr("title");
+            const imageUrl = el.selectFirst("img")?.attr("data-src") || el.selectFirst("img")?.getSrc;
+
+            // Extract the series name by removing episode numbers and other suffixes
+            const seriesNameMatch = fullName.match(/^(.*?)(?: Episode \d+)?/i);
+            const seriesName = seriesNameMatch ? seriesNameMatch[1].trim() : fullName.trim();
+
+            // Create a unique entry for each series to avoid duplicates on the list page
+            if (!seriesMap.has(seriesName) && seriesName) {
+                // We create a "virtual" link to pass the series name to getDetail
+                const seriesLink = `/series/${encodeURIComponent(seriesName)}`;
+                seriesMap.set(seriesName, {
+                    name: seriesName,
+                    imageUrl: imageUrl,
+                    link: seriesLink,
+                });
+            }
+        });
+
+        const list = Array.from(seriesMap.values());
+        const hasNextPage = !!doc.selectFirst("li a:contains(Next)");
+
         return { list, hasNextPage };
     }
 
+
     async getPopular(page) {
-        // "Popular" on this site is "Most Viewed"
-        const path = page === 1 ? "/most-viewed/" : `/most-viewed/page/${page}/`;
-        return this._getAnimePage(path);
+        const url = page === 1 ?
+            `${this.source.baseUrl}/category/engsub/?filter=latest` :
+            `${this.source.baseUrl}/category/engsub/page/${page}/?filter=latest`;
+        return this._getAnimePage(url);
     }
 
     async getLatestUpdates(page) {
-        // The homepage is page 1 of latest.
-        const path = page === 1 ? "/" : `/page/${page}/`;
-        return this._getAnimePage(path);
+        const url = page === 1 ?
+            `${this.source.baseUrl}/category/new-releases/?filter=latest` :
+            `${this.source.baseUrl}/category/new-releases/page/${page}/?filter=latest`;
+        return this._getAnimePage(url);
     }
 
-    async search(query, page, filters) {
-        // This site uses a simple query parameter for search.
-        const path = page === 1 ? `/?s=${encodeURIComponent(query)}` : `/page/${page}/?s=${encodeURIComponent(query)}`;
-        return this._getAnimePage(path);
+    async search(query, page) {
+        const url = `${this.source.baseUrl}/page/${page}/?s=${encodeURIComponent(query)}`;
+        return this._getAnimePage(url);
     }
 
     async getDetail(url) {
-        const baseUrl = this.getBaseUrl();
-        const pageUrl = baseUrl + url;
-        const res = await this.client.get(pageUrl, this.getHeaders());
+        // The URL is a "virtual" link like "/series/SERIES_NAME"
+        if (!url.startsWith('/series/')) {
+            throw new Error('Invalid series URL');
+        }
+
+        const seriesName = decodeURIComponent(url.replace('/series/', ''));
+        const baseUrl = this.source.baseUrl;
+        const searchUrl = `${baseUrl}/?s=${encodeURIComponent(seriesName)}`;
+
+        const res = await this.client.get(searchUrl, this.getHeaders());
         const doc = new Document(res.body);
 
-        const name = doc.selectFirst("h1.entry-title").text.trim();
-        const imageUrl = doc.selectFirst("meta[property='og:image']").attr("content");
-        const description = doc.selectFirst("div.entry-content")?.text.trim() || "No description available.";
-        // Tags are inside a span with links
-        const genre = doc.select("span.entry-cats a").map(el => el.text.trim());
-        const status = 1; // Completed
+        const chapters = [];
+        let firstEpisodeUrl = null;
+        let imageUrl = null;
 
-        // Each post is a single video, so we create one "chapter"
-        const chapters = [{
-            name: name,
-            url: url
-        }];
+        // Find all episodes related to the series from the search results
+        doc.select("article.thumb-block").forEach(el => {
+            const a = el.selectFirst("a");
+            if (!a) return;
+            const episodeName = a.attr("title");
+
+            // Ensure it's part of the same series by checking the title
+            if (episodeName.toLowerCase().startsWith(seriesName.toLowerCase())) {
+                const episodeUrl = a.getHref.replace(baseUrl, "");
+                chapters.push({ name: episodeName, url: episodeUrl });
+                if (!firstEpisodeUrl) {
+                    firstEpisodeUrl = episodeUrl;
+                    imageUrl = el.selectFirst("img")?.attr("data-src") || el.selectFirst("img")?.getSrc;
+                }
+            }
+        });
+
+        if (chapters.length === 0) {
+            throw new Error(`No episodes found for "${seriesName}".`);
+        }
+
+        // Fetch the first episode page to get genres
+        let genre = [];
+        if (firstEpisodeUrl) {
+            try {
+                const firstEpRes = await this.client.get(baseUrl + firstEpisodeUrl, this.getHeaders());
+                const firstEpDoc = new Document(firstEpRes.body);
+                genre = firstEpDoc.select("div.video-tags a.label").map(g => g.text.trim());
+            } catch (e) {
+                // Ignore if fetching first episode fails
+                console.error(`Failed to fetch genres from ${firstEpisodeUrl}: ${e.message}`);
+            }
+        }
+
+        // Custom sort based on "Episode XX" in the title
+        chapters.sort((a, b) => {
+            const numA = parseInt(a.name.match(/Episode (\d+)/i)?.[1] || 0);
+            const numB = parseInt(b.name.match(/Episode (\d+)/i)?.[1] || 0);
+            return numA - numB;
+        });
 
         return {
-            name,
+            name: seriesName,
             imageUrl,
-            description,
             genre,
-            status,
-            chapters,
-            link: pageUrl
+            status: 1, // Ongoing
+            chapters: chapters,
+            link: url, // Return the virtual link
         };
     }
 
     async getVideoList(url) {
-        const baseUrl = this.getBaseUrl();
-        const pageUrl = baseUrl + url;
+        const baseUrl = this.source.baseUrl;
+        const episodePageUrl = baseUrl + url;
+        const res = await this.client.get(episodePageUrl, this.getHeaders(episodePageUrl));
+        const body = res.body;
 
-        // Step 1: Get the main page to find the iframe URL
-        const mainRes = await this.client.get(pageUrl, this.getHeaders(baseUrl));
-        const mainDoc = new Document(mainRes.body);
+        let sources = [];
+        let subtitles = [];
 
-        // The video is in an iframe from a domain like vanfem.com
-        const iframeElement = mainDoc.selectFirst('iframe[src*="vanfem.com"], iframe[src*="guccihide.com"]');
-        if (!iframeElement) {
-            throw new Error("Could not find the video iframe on the page.");
-        }
-        const iframeUrl = iframeElement.getSrc;
-
-        // Step 2: Get the iframe page content
-        const iframeRes = await this.client.get(iframeUrl, this.getHeaders(pageUrl));
-        const iframeDoc = new Document(iframeRes.body);
-
-        // Step 3: Extract the video sources from the script in the iframe page
-        const scriptElement = iframeDoc.selectFirst("script:contains(jwplayer(\"player\").setup)");
-        if (!scriptElement) {
-            throw new Error("Could not find video player configuration script in the iframe.");
-        }
-
-        const scriptContent = scriptElement.text;
-        const sourcesRegex = /sources:\s*(\[.*?\])/s;
-        const match = scriptContent.match(sourcesRegex);
-
-        if (!match || match.length < 2) {
-            throw new Error("Could not extract video sources from the script.");
-        }
-
-        // The extracted string might not be perfect JSON, so we clean it up
-        let sourcesJson = match[1].replace(/'/g, '"'); // Replace single quotes with double quotes
-        const sourcesArray = JSON.parse(sourcesJson);
-
-        let videos = sourcesArray.map(source => ({
-            url: source.file,
-            originalUrl: source.file,
-            quality: source.label || "Default",
-        }));
-
-        const showPreferredOnly = this.getPreference("enable_preferred_quality_only") ?? true;
-
-        if (showPreferredOnly) {
-            const preferredQuality = this.getPreference("pref_quality") || "1080p";
-            const preferredVideo = videos.find(video => video.quality === preferredQuality);
-            if (preferredVideo) {
-                return [preferredVideo];
+        // Method 1: Look for sources directly embedded in jwpConfig
+        let sourcesMatch = body.match(/sources:\s*(\[[\s\S]*?\])/);
+        if (sourcesMatch && sourcesMatch[1] && sourcesMatch[1].includes('"file"')) {
+            try {
+                // Use regex to parse JS object string, as it's not valid JSON
+                const sourceItems = sourcesMatch[1].match(/\{[\s\S]*?\}/g) || [];
+                sourceItems.forEach(item => {
+                    const fileMatch = item.match(/file"\s*:\s*"(.*?)"/);
+                    const labelMatch = item.match(/label"\s*:\s*"(.*?)"/);
+                    if (fileMatch && labelMatch) {
+                        sources.push({
+                            url: "https:" + fileMatch[1].replace(/\\/g, ''),
+                            quality: labelMatch[1],
+                            originalUrl: "https:" + fileMatch[1].replace(/\\/g, ''),
+                        });
+                    }
+                });
+            } catch (e) {
+                console.error("Failed to parse direct sources from jwpConfig");
             }
         }
-        
-        videos.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
-        return videos;
-    }
 
-    getFilterList() {
-        // This site's search doesn't support filters/tags alongside keyword search.
-        // It's either search by keyword OR browse by category.
-        // Therefore, we return an empty list.
-        return [];
-    }
-
-    getSourcePreferences() {
-        return [
-            {
-                key: "override_base_url",
-                editTextPreference: {
-                    title: "Override Base URL",
-                    summary: "Use a different mirror/domain for the source. Requires app restart.",
-                    value: this.source.baseUrl.trim(),
-                    dialogTitle: "Enter new Base URL",
-                    dialogMessage: `Default: ${this.source.baseUrl.trim()}`
-                }
-            },
-            {
-                key: "pref_quality",
-                listPreference: {
-                    title: "Preferred quality",
-                    summary: "Note: Not all videos have all qualities available.",
-                    valueIndex: 0,
-                    entries: ["1080p", "720p", "480p", "360p", "Default"],
-                    entryValues: ["1080p", "720p", "480p", "360p", "Default"]
-                }
-            },
-            {
-                key: "enable_preferred_quality_only",
-                switchPreferenceCompat: {
-                    title: "Show Preferred Quality Only",
-                    summary: "If enabled, only shows the selected quality. If disabled, shows all available qualities.",
-                    value: true,
+        // Method 2: If no sources found, look for API URL in the script
+        if (sources.length === 0) {
+            const apiUrlMatch = body.match(/url:\s*"(\/\/doodst\.com\/api\/[^"]+)"/);
+            if (apiUrlMatch && apiUrlMatch[1]) {
+                const apiUrl = "https:" + apiUrlMatch[1];
+                try {
+                    const apiRes = await this.client.get(apiUrl, this.getHeaders(episodePageUrl));
+                    const apiData = JSON.parse(apiRes.body);
+                    if (apiData.status === "ok" && apiData.sources) {
+                        apiData.sources.forEach(source => {
+                            sources.push({
+                                url: "https:" + source.file,
+                                quality: source.label,
+                                originalUrl: "https:" + source.file,
+                            });
+                        });
+                        if (apiData.tracks) {
+                            apiData.tracks.forEach(track => {
+                                subtitles.push({ file: track.file, label: track.label });
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.error(`API call to ${apiUrl} failed: ${e.message}`);
                 }
             }
-        ];
+        }
+
+        // Get subtitles from jwpConfig if not already retrieved from API
+        if (subtitles.length === 0) {
+            let tracksMatch = body.match(/tracks:\s*(\[[\s\S]*?\])/);
+            if (tracksMatch && tracksMatch[1]) {
+                try {
+                    const trackItems = tracksMatch[1].match(/\{[\s\S]*?\}/g) || [];
+                    trackItems.forEach(item => {
+                        const fileMatch = item.match(/file"\s*:\s*"(.*?)"/);
+                        const labelMatch = item.match(/label"\s*:\s*"(.*?)"/);
+                        if (fileMatch && labelMatch) {
+                            subtitles.push({
+                                file: fileMatch[1].replace(/\\/g, ''),
+                                label: labelMatch[1]
+                            });
+                        }
+                    });
+                } catch (e) {
+                    console.error("Failed to parse subtitles from jwpConfig");
+                }
+            }
+        }
+
+        // Method 3 (Fallback): Extract iframe embed URLs from server buttons
+        if (sources.length === 0) {
+            const doc = new Document(body);
+            const serverButtons = doc.select("div.list-server button");
+            for (const button of serverButtons) {
+                const embedHtml = button.attr("data-embed");
+                const srcMatch = embedHtml.match(/src="([^"]+)"/);
+                if (srcMatch && srcMatch[1]) {
+                    let embedUrl = srcMatch[1];
+                    if (embedUrl.startsWith("//")) {
+                        embedUrl = "https:" + embedUrl;
+                    }
+                    sources.push({
+                        url: embedUrl,
+                        quality: button.text.trim(),
+                        originalUrl: embedUrl,
+                    });
+                }
+            }
+        }
+
+        if (sources.length === 0) {
+            throw new Error("No video sources found.");
+        }
+
+        // Add subtitles to all video sources found and sort by quality
+        const sortedSources = sources.map(s => ({ ...s, subtitles }));
+        sortedSources.sort((a, b) => {
+            const qualityA = parseInt(a.quality);
+            const qualityB = parseInt(b.quality);
+            if (!isNaN(qualityA) && !isNaN(qualityB)) {
+                return qualityB - qualityA;
+            }
+            return 0; // Keep original order for non-numeric qualities
+        });
+
+        return sortedSources;
     }
 }
