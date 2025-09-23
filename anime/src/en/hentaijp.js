@@ -11,173 +11,160 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/en/hentaijp.js"
 }];
 
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
         this.client = new Client();
     }
 
-    getBaseUrl() {
-        return this.source.baseUrl.trim();
-    }
+    _parseList(html) {
+        const doc = new Document(html);
+        const list = [];
+        const items = doc.select("article.thumb-block");
 
-    getHeaders() {
-        return {
-            "Referer": this.getBaseUrl()
-        };
-    }
+        for (const item of items) {
+            const linkElement = item.selectFirst("a");
+            const imgElement = item.selectFirst(".post-thumbnail img");
 
-    _parseAnimeFromElement(element) {
-        const a = element.selectFirst("a");
-        const link = a.getHref.replace(this.getBaseUrl(), "");
-        const name = a.attr("data-title");
-        const img = a.selectFirst("img");
-        let imageUrl = img.attr("data-src") || img.getSrc;
-        
-        if (imageUrl && !imageUrl.startsWith("http")) {
-            if (imageUrl.startsWith("//")) {
-                imageUrl = "https:" + imageUrl;
-            } else {
-                imageUrl = this.getBaseUrl() + imageUrl;
+            if (linkElement && imgElement) {
+                const link = linkElement.attr("href");
+                const name = linkElement.attr("title"); // Use title attribute which is consistently available
+                const imageUrl = imgElement.attr("data-src") || imgElement.attr("src");
+
+                list.push({ name, link, imageUrl });
             }
         }
-        return { name, imageUrl, link };
-    }
 
-    async _getAnimePage(path) {
-        const baseUrl = this.getBaseUrl();
-        const res = await this.client.get(baseUrl + path, this.getHeaders());
-        const doc = new Document(res.body);
-        const list = doc.select("article.thumb-block").map(el => this._parseAnimeFromElement(el));
-        const hasNextPage = !!doc.selectFirst("a:contains(Next)");
+        const hasNextPage = doc.selectFirst("a:contains(Next)") != null;
         return { list, hasNextPage };
     }
 
     async getPopular(page) {
-        const pagePath = page > 1 ? `page/${page}/` : '';
-        return this._getAnimePage(`/category/engsub/${pagePath}?filter=latest`);
+        const url = page === 1 ?
+            `${this.source.baseUrl}/category/engsub/?filter=latest` :
+            `${this.source.baseUrl}/category/engsub/page/${page}/?filter=latest`;
+        const res = await this.client.get(url);
+        return this._parseList(res.body);
     }
 
     async getLatestUpdates(page) {
-        const pagePath = page > 1 ? `page/${page}/` : '';
-        return this._getAnimePage(`/category/new-releases/${pagePath}?filter=latest`);
+        const url = page === 1 ?
+            `${this.source.baseUrl}/category/new-releases/?filter=latest` :
+            `${this.source.baseUrl}/category/new-releases/page/${page}/?filter=latest`;
+        const res = await this.client.get(url);
+        return this._parseList(res.body);
     }
 
     async search(query, page, filters) {
-        const pagePath = page > 1 ? `/page/${page}/` : '';
-        const url = `${this.getBaseUrl()}${pagePath}?s=${encodeURIComponent(query)}`;
-        const res = await this.client.get(url, this.getHeaders());
-        const doc = new Document(res.body);
-        const list = doc.select("article.thumb-block").map(el => this._parseAnimeFromElement(el));
-        const hasNextPage = !!doc.selectFirst("a:contains(Next)");
-        return { list, hasNextPage };
+        const url = `${this.source.baseUrl}/page/${page}/?s=${encodeURIComponent(query)}`;
+        const res = await this.client.get(url);
+        return this._parseList(res.body);
     }
 
     async getDetail(url) {
-        const baseUrl = this.getBaseUrl();
-        const detailPageUrl = baseUrl + url;
-        const res = await this.client.get(detailPageUrl, this.getHeaders());
+        const res = await this.client.get(url);
         const doc = new Document(res.body);
-
-        const name = doc.selectFirst("header.entry-header h1").text.trim();
-        const genre = doc.select("div.video-tags a.label").map(el => el.text.trim());
-        const status = 1; // Completed, as each post is a single episode.
+        const name = doc.selectFirst("header.entry-header h1").text;
+        const imageUrl = doc.selectFirst("meta[property='og:image']").attr("content");
+        const genres = doc.select(".video-tags .tags-list a").map(e => e.text);
         
-        // The site lists each episode as a separate post. There are no series pages.
-        // Therefore, the "chapters" list will only contain the episode itself.
-        const chapters = [{ name: name, url: url }];
+        const description = `Genres: ${genres.join(", ")}`;
 
         return {
-            name,
-            genre,
-            status,
-            chapters,
-            link: detailPageUrl,
-            description: "" // No description available on the page.
+            name: name,
+            imageUrl: imageUrl,
+            description: description,
+            link: url,
+            chapters: [{
+                name: "Episode",
+                url: url
+            }],
+            status: 0 // Completed
         };
     }
 
+    async _extractDoodstreamVideos(url) {
+        const videoList = [];
+        try {
+            const res = await this.client.get(url, { headers: { "Referer": this.source.baseUrl } });
+            
+            // Method 1: AJAX API call from script
+            let apiMatch = res.body.match(/url:\s*"(\/\/(?:doodst\.com|doodstream\.cv)\/api\/[^"]+)"/);
+            if (apiMatch) {
+                const apiUrl = `https:${apiMatch[1]}`;
+                const apiRes = await this.client.get(apiUrl, { headers: { "Referer": url } });
+                const data = JSON.parse(apiRes.body);
+
+                if (data.status === "ok" && data.sources) {
+                    return data.sources.map(source => ({
+                        url: `https:${source.file}`,
+                        originalUrl: `https:${source.file}`,
+                        quality: source.label,
+                    }));
+                }
+            }
+
+            // Method 2: Direct sources array in script
+            const sourcesMatch = res.body.match(/sources:\s*(\[.*?\]),/);
+            if (sourcesMatch) {
+                const sources = JSON.parse(sourcesMatch[1]);
+                return sources.map(source => ({
+                    url: `https:${source.file}`,
+                    originalUrl: `https:${source.file}`,
+                    quality: source.label,
+                }));
+            }
+        } catch (e) {
+            console.error(`Error extracting from Doodstream URL ${url}: ${e}`);
+        }
+        return videoList;
+    }
+
     async getVideoList(url) {
-        const baseUrl = this.getBaseUrl();
-        const episodePageUrl = baseUrl + url;
-        const res = await this.client.get(episodePageUrl, this.getHeaders());
+        const res = await this.client.get(url);
         const doc = new Document(res.body);
-        let videos = [];
+        const videoList = [];
+        const serverButtons = doc.select(".list-server ul li button");
 
-        const scripts = doc.select("script");
-        for (const script of scripts) {
-            const scriptText = script.html;
-            if (scriptText.includes("jwpConfig")) {
-                // Priority 1: Get direct video links from embedded sources in the script
-                const sourcesMatch = scriptText.match(/sources:\s*(\[.*?\])/);
-                if (sourcesMatch && sourcesMatch[1]) {
-                    try {
-                        const sourcesArray = JSON.parse(sourcesMatch[1]);
-                        for (const source of sourcesArray) {
-                            let fileUrl = source.file;
-                            if (fileUrl.startsWith("//")) {
-                                fileUrl = "https:" + fileUrl;
-                            }
-                            videos.push({ url: fileUrl, originalUrl: fileUrl, quality: source.label });
+        for (const button of serverButtons) {
+            const serverName = button.text.trim();
+            if (button.hasAttr("data-embed")) {
+                const embedHtml = button.attr("data-embed");
+                const embedMatch = embedHtml.match(/src="([^"]+)"/);
+
+                if (embedMatch) {
+                    let embedUrl = embedMatch[1];
+                    if (embedUrl.startsWith("//")) {
+                        embedUrl = `https:${embedUrl}`;
+                    }
+                    
+                    if (embedUrl.includes("doodst.com") || embedUrl.includes("doodstream.cv")) {
+                        const doodVideos = await this._extractDoodstreamVideos(embedUrl);
+                        for (const video of doodVideos) {
+                            video.quality = `${serverName}: ${video.quality}`;
+                            videoList.push(video);
                         }
-                    } catch (e) { /* Parsing failed, try next method */ }
+                    } else {
+                        // Fallback for other servers
+                        videoList.push({
+                            url: embedUrl,
+                            originalUrl: embedUrl,
+                            quality: serverName,
+                        });
+                    }
                 }
-
-                if (videos.length > 0) break; // Found sources, no need to check other scripts
-
-                // Priority 2: Get video links from an API call URL in the script
-                const apiMatch = scriptText.match(/url:\s*"([^"]+)"/);
-                if (apiMatch && apiMatch[1] && apiMatch[1].includes("/api/")) {
-                    try {
-                        let apiUrl = apiMatch[1];
-                        if (apiUrl.startsWith("//")) {
-                             apiUrl = "https:" + apiUrl;
-                        }
-                        const apiRes = await this.client.get(apiUrl, this.getHeaders());
-                        const apiData = JSON.parse(apiRes.body);
-                        if (apiData.status === "ok" && apiData.sources) {
-                           for (const source of apiData.sources) {
-                               let fileUrl = source.file;
-                               if (fileUrl.startsWith("//")) {
-                                   fileUrl = "https:" + fileUrl;
-                               }
-                               videos.push({ url: fileUrl, originalUrl: fileUrl, quality: source.label });
-                           }
-                        }
-                    } catch (e) { /* API call failed, try next method */ }
-                }
-                if (videos.length > 0) break;
             }
         }
         
-        // Fallback: If no direct links found, get embed URLs from server buttons
-        if (videos.length === 0) {
-            const buttons = doc.select("div.text-center.list-server li button");
-            for (const button of buttons) {
-                const embedHtml = button.attr("data-embed");
-                const srcMatch = embedHtml.match(/src=(?:"|&quot;)([^"&]+)/);
-                if (srcMatch && srcMatch[1]) {
-                    let embedUrl = srcMatch[1];
-                    if (embedUrl.startsWith("//")) {
-                        embedUrl = "https:" + embedUrl;
-                    }
-                    const serverName = button.text.trim();
-                    videos.push({ url: embedUrl, originalUrl: embedUrl, quality: serverName });
-                }
-            }
-        }
-
-        // Filter out low-quality "Default" if other qualities exist, and sort by quality
-        const filteredVideos = videos.filter(v => v.quality !== "Default" || videos.length === 1);
-        return filteredVideos.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
+        // Sort by quality to have higher resolutions first
+        return videoList.sort((a, b) => (b.quality || "").localeCompare(a.quality || ""));
     }
 
-    // This source does not support filters.
     getFilterList() {
         return [];
     }
-
-    // Preferences are not needed for this source.
+    
     getSourcePreferences() {
         return [];
     }
