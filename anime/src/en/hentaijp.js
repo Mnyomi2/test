@@ -13,10 +13,10 @@ const mangayomiSources = [{
     "baseUrl": "https://hentai.jp",
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=hentai.jp",
     "typeSource": "single",
-    "itemType": 1, // 1 for anime
+    "itemType": 1,
     "isNsfw": true,
     "version": "1.0.0",
-    "pkgPath": "anime/src/en/hentaijp.js" // Fictional path
+    "pkgPath": "anime/src/en/hentaijp.js"
 }];
 
 // ------------  NEW CONSTANTS FOR HENTAI.JP  ------------
