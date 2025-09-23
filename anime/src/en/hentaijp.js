@@ -18,153 +18,195 @@ class DefaultExtension extends MProvider {
         this.client = new Client();
     }
 
-    _parseList(html) {
-        const doc = new Document(html);
-        const list = [];
-        const items = doc.select("article.thumb-block");
+    getBaseUrl() {
+        return this.source.baseUrl.trim();
+    }
 
-        for (const item of items) {
-            const linkElement = item.selectFirst("a");
-            const imgElement = item.selectFirst(".post-thumbnail img");
+    getHeaders() {
+        return {
+            "Referer": this.getBaseUrl()
+        };
+    }
 
-            if (linkElement && imgElement) {
-                const link = linkElement.attr("href");
-                const name = linkElement.attr("title"); // Use title attribute which is consistently available
-                const imageUrl = imgElement.attr("data-src") || imgElement.attr("src");
+    _parseAnimeFromElement(element) {
+        const a = element.selectFirst("a");
+        if (!a) return null;
+        
+        const href = a.getHref;
+        if (!href) return null;
+        
+        const name = a.attr("title") || a.attr("data-title");
+        if (!name) return null;
+        
+        const link = href.replace(this.getBaseUrl(), "");
 
-                list.push({ name, link, imageUrl });
+        const img = a.selectFirst("img");
+        let imageUrl = "";
+        if (img) {
+            imageUrl = img.attr("data-src") || img.getSrc;
+            if (imageUrl && !imageUrl.startsWith("http")) {
+                imageUrl = imageUrl.startsWith("//") ? "https:" + imageUrl : this.getBaseUrl() + imageUrl;
             }
         }
+       
+        return { name, imageUrl: imageUrl || "", link };
+    }
 
-        const hasNextPage = doc.selectFirst("a:contains(Next)") != null;
+    async _getAnimePage(path) {
+        const baseUrl = this.getBaseUrl();
+        const res = await this.client.get(baseUrl + path, this.getHeaders());
+        const doc = new Document(res.body);
+        
+        // Target items inside the specific container div for more accuracy.
+        const list = doc.select("div.videos-list article.thumb-block")
+            .map(el => this._parseAnimeFromElement(el))
+            .filter(Boolean); // Safely remove any null entries to prevent crashes.
+
+        const hasNextPage = !!doc.selectFirst("a:contains(Next)");
         return { list, hasNextPage };
     }
 
     async getPopular(page) {
-        const url = page === 1 ?
-            `${this.source.baseUrl}/category/engsub/?filter=latest` :
-            `${this.source.baseUrl}/category/engsub/page/${page}/?filter=latest`;
-        const res = await this.client.get(url);
-        return this._parseList(res.body);
+        const pagePath = page > 1 ? `page/${page}/` : '';
+        return this._getAnimePage(`/category/engsub/${pagePath}?filter=latest`);
     }
 
     async getLatestUpdates(page) {
-        const url = page === 1 ?
-            `${this.source.baseUrl}/category/new-releases/?filter=latest` :
-            `${this.source.baseUrl}/category/new-releases/page/${page}/?filter=latest`;
-        const res = await this.client.get(url);
-        return this._parseList(res.body);
+        const pagePath = page > 1 ? `page/${page}/` : '';
+        return this._getAnimePage(`/category/new-releases/${pagePath}?filter=latest`);
     }
 
     async search(query, page, filters) {
-        const url = `${this.source.baseUrl}/page/${page}/?s=${encodeURIComponent(query)}`;
-        const res = await this.client.get(url);
-        return this._parseList(res.body);
+        const pagePath = page > 1 ? `/page/${page}/` : '';
+        const url = `${this.getBaseUrl()}${pagePath}?s=${encodeURIComponent(query)}`;
+        const res = await this.client.get(url, this.getHeaders());
+        const doc = new Document(res.body);
+        
+        const list = doc.select("div.videos-list article.thumb-block")
+            .map(el => this._parseAnimeFromElement(el))
+            .filter(Boolean); // Safely remove any null entries.
+
+        const hasNextPage = !!doc.selectFirst("a:contains(Next)");
+        return { list, hasNextPage };
     }
 
     async getDetail(url) {
-        const res = await this.client.get(url);
+        const baseUrl = this.getBaseUrl();
+        const detailPageUrl = baseUrl + url;
+        const res = await this.client.get(detailPageUrl, this.getHeaders());
         const doc = new Document(res.body);
-        const name = doc.selectFirst("header.entry-header h1").text;
-        const imageUrl = doc.selectFirst("meta[property='og:image']").attr("content");
-        const genres = doc.select(".video-tags .tags-list a").map(e => e.text);
+
+        const titleElement = doc.selectFirst("header.entry-header h1");
+        if (!titleElement) {
+             throw new Error("Could not find title on page.");
+        }
+        const name = titleElement.text.trim();
         
-        const description = `Genres: ${genres.join(", ")}`;
+        const genre = doc.select("div.video-tags a.label").map(el => el.text.trim());
+        const status = 1; // Completed
+        
+        // Each post is a single episode, using the same URL as the detail page.
+        const chapters = [{ name: name, url: url }];
 
         return {
-            name: name,
-            imageUrl: imageUrl,
-            description: description,
-            link: url,
-            chapters: [{
-                name: "Episode",
-                url: url
-            }],
-            status: 0 // Completed
+            name,
+            imageUrl: "", // App will use the thumbnail from the list view.
+            genre,
+            status,
+            chapters,
+            link: detailPageUrl,
+            description: "" 
         };
     }
 
-    async _extractDoodstreamVideos(url) {
-        const videoList = [];
-        try {
-            const res = await this.client.get(url, { headers: { "Referer": this.source.baseUrl } });
-            
-            // Method 1: AJAX API call from script
-            let apiMatch = res.body.match(/url:\s*"(\/\/(?:doodst\.com|doodstream\.cv)\/api\/[^"]+)"/);
-            if (apiMatch) {
-                const apiUrl = `https:${apiMatch[1]}`;
-                const apiRes = await this.client.get(apiUrl, { headers: { "Referer": url } });
-                const data = JSON.parse(apiRes.body);
-
-                if (data.status === "ok" && data.sources) {
-                    return data.sources.map(source => ({
-                        url: `https:${source.file}`,
-                        originalUrl: `https:${source.file}`,
-                        quality: source.label,
-                    }));
-                }
-            }
-
-            // Method 2: Direct sources array in script
-            const sourcesMatch = res.body.match(/sources:\s*(\[.*?\]),/);
-            if (sourcesMatch) {
-                const sources = JSON.parse(sourcesMatch[1]);
-                return sources.map(source => ({
-                    url: `https:${source.file}`,
-                    originalUrl: `https:${source.file}`,
-                    quality: source.label,
-                }));
-            }
-        } catch (e) {
-            console.error(`Error extracting from Doodstream URL ${url}: ${e}`);
-        }
-        return videoList;
-    }
-
     async getVideoList(url) {
-        const res = await this.client.get(url);
+        const baseUrl = this.getBaseUrl();
+        const episodePageUrl = baseUrl + url;
+        const res = await this.client.get(episodePageUrl, this.getHeaders());
         const doc = new Document(res.body);
-        const videoList = [];
-        const serverButtons = doc.select(".list-server ul li button");
+        let videos = [];
 
-        for (const button of serverButtons) {
-            const serverName = button.text.trim();
-            if (button.hasAttr("data-embed")) {
-                const embedHtml = button.attr("data-embed");
-                const embedMatch = embedHtml.match(/src="([^"]+)"/);
-
-                if (embedMatch) {
-                    let embedUrl = embedMatch[1];
-                    if (embedUrl.startsWith("//")) {
-                        embedUrl = `https:${embedUrl}`;
-                    }
-                    
-                    if (embedUrl.includes("doodst.com") || embedUrl.includes("doodstream.cv")) {
-                        const doodVideos = await this._extractDoodstreamVideos(embedUrl);
-                        for (const video of doodVideos) {
-                            video.quality = `${serverName}: ${video.quality}`;
-                            videoList.push(video);
+        const scripts = doc.select("script");
+        for (const script of scripts) {
+            const scriptText = script.html;
+            if (scriptText.includes("jwpConfig")) {
+                const sourcesMatch = scriptText.match(/sources:\s*(\[.*?\])/);
+                if (sourcesMatch && sourcesMatch[1]) {
+                    try {
+                        const sourcesArray = JSON.parse(sourcesMatch[1].replace(/\\/g, ''));
+                        for (const source of sourcesArray) {
+                            let fileUrl = source.file;
+                            if (fileUrl.startsWith("//")) {
+                                fileUrl = "https:" + fileUrl;
+                            }
+                            videos.push({ url: fileUrl, originalUrl: fileUrl, quality: source.label });
                         }
-                    } else {
-                        // Fallback for other servers
-                        videoList.push({
-                            url: embedUrl,
-                            originalUrl: embedUrl,
-                            quality: serverName,
-                        });
+                    } catch (e) { /* Ignore parsing errors */ }
+                }
+
+                if (videos.length > 0) break;
+
+                const apiMatch = scriptText.match(/url:\s*"(https?:)?\/\/([^"]+\/api\/[^"]+)"/);
+                if (apiMatch) {
+                    try {
+                        let apiUrl = apiMatch[0].split('"')[1];
+                        if (apiUrl.startsWith("//")) {
+                             apiUrl = "https:" + apiUrl;
+                        }
+                        const apiRes = await this.client.get(apiUrl, this.getHeaders());
+                        const apiData = JSON.parse(apiRes.body);
+                        if (apiData.status === "ok" && apiData.sources) {
+                           for (const source of apiData.sources) {
+                               let fileUrl = source.file;
+                               if (fileUrl.startsWith("//")) {
+                                   fileUrl = "https:" + fileUrl;
+                               }
+                               videos.push({ url: fileUrl, originalUrl: fileUrl, quality: source.label });
+                           }
+                        }
+                    } catch (e) { /* Ignore API errors */ }
+                }
+                if (videos.length > 0) break;
+            }
+        }
+        
+        if (videos.length === 0) {
+            const buttons = doc.select("div.text-center.list-server li button");
+            for (const button of buttons) {
+                const embedHtml = button.attr("data-embed");
+                const srcMatch = embedHtml.match(/src=(?:"|&quot;)([^"&]+)/);
+                if (srcMatch && srcMatch[1]) {
+                    let embedUrl = srcMatch[1];
+                    if (embedUrl.startsWith("//")) {
+                        embedUrl = "https:" + embedUrl;
                     }
+                    const serverName = button.text.trim();
+                    videos.push({ url: embedUrl, originalUrl: embedUrl, quality: serverName });
                 }
             }
         }
         
-        // Sort by quality to have higher resolutions first
-        return videoList.sort((a, b) => (b.quality || "").localeCompare(a.quality || ""));
+        const qualityOrder = ["Original", "1080p", "720p", "360p", "Default"];
+        const seenQualities = new Set();
+        const uniqueVideos = videos.filter(video => {
+            if (!video.quality || seenQualities.has(video.quality)) {
+                return false;
+            }
+            seenQualities.add(video.quality);
+            return true;
+        });
+        
+        return uniqueVideos.sort((a, b) => {
+            const indexA = qualityOrder.indexOf(a.quality);
+            const indexB = qualityOrder.indexOf(b.quality);
+            return (indexA === -1 ? 99 : indexA) - (indexB === -1 ? 99 : indexB);
+        });
     }
 
     getFilterList() {
         return [];
     }
-    
+
     getSourcePreferences() {
         return [];
     }
