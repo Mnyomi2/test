@@ -12,6 +12,8 @@ const mangayomiSources = [{
 }];
 
 
+
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -52,42 +54,71 @@ class DefaultExtension extends MProvider {
         return { name, imageUrl: imageUrl || "", link };
     }
 
-    async _getAnimePage(path) {
+    // Helper for paginated category pages and search results
+    async _getPaginatedResults(path) {
         const baseUrl = this.getBaseUrl();
         const res = await this.client.get(baseUrl + path, this.getHeaders());
         const doc = new Document(res.body);
         
-        // Target items inside the specific container div for more accuracy.
-        const list = doc.select("div.videos-list article.thumb-block")
+        const list = doc.select("div.videos-list article.thumb-block, article.thumb-block")
             .map(el => this._parseAnimeFromElement(el))
-            .filter(Boolean); // Safely remove any null entries to prevent crashes.
+            .filter(Boolean);
 
         const hasNextPage = !!doc.selectFirst("a:contains(Next)");
         return { list, hasNextPage };
     }
 
     async getPopular(page) {
-        const pagePath = page > 1 ? `page/${page}/` : '';
-        return this._getAnimePage(`/category/engsub/${pagePath}?filter=latest`);
+        const baseUrl = this.getBaseUrl();
+        if (page > 1) {
+            const pagePath = `page/${page}/`;
+            return this._getPaginatedResults(`/category/engsub/${pagePath}?filter=latest`);
+        }
+
+        // For page 1, parse the home page's "English/Spanish Subbed" section
+        const res = await this.client.get(baseUrl, this.getHeaders());
+        const doc = new Document(res.body);
+        const widgets = doc.select("section.widget_videos_block");
+        let popularList = [];
+        for (const widget of widgets) {
+            const title = widget.selectFirst("h2.widget-title")?.text;
+            if (title && title.includes("English/Spanish Subbed")) {
+                popularList = widget.select("article.thumb-block")
+                    .map(el => this._parseAnimeFromElement(el))
+                    .filter(Boolean);
+                break;
+            }
+        }
+        return { list: popularList, hasNextPage: true };
     }
 
     async getLatestUpdates(page) {
-        const pagePath = page > 1 ? `page/${page}/` : '';
-        return this._getAnimePage(`/category/new-releases/${pagePath}?filter=latest`);
+        const baseUrl = this.getBaseUrl();
+        if (page > 1) {
+            const pagePath = `page/${page}/`;
+            return this._getPaginatedResults(`/category/new-releases/${pagePath}?filter=latest`);
+        }
+
+        // For page 1, parse the home page's "New Releases" section
+        const res = await this.client.get(baseUrl, this.getHeaders());
+        const doc = new Document(res.body);
+        const widgets = doc.select("section.widget_videos_block");
+        let latestList = [];
+        for (const widget of widgets) {
+            const title = widget.selectFirst("h2.widget-title")?.text;
+            if (title && title.includes("New Releases")) {
+                latestList = widget.select("article.thumb-block")
+                    .map(el => this._parseAnimeFromElement(el))
+                    .filter(Boolean);
+                break;
+            }
+        }
+        return { list: latestList, hasNextPage: true };
     }
 
     async search(query, page, filters) {
         const pagePath = page > 1 ? `/page/${page}/` : '';
-        const url = `${this.getBaseUrl()}${pagePath}?s=${encodeURIComponent(query)}`;
-        const res = await this.client.get(url, this.getHeaders());
-        const doc = new Document(res.body);
-        
-        const list = doc.select("div.videos-list article.thumb-block")
-            .map(el => this._parseAnimeFromElement(el))
-            .filter(Boolean); // Safely remove any null entries.
-
-        const hasNextPage = !!doc.selectFirst("a:contains(Next)");
-        return { list, hasNextPage };
+        return this._getPaginatedResults(`${pagePath}?s=${encodeURIComponent(query)}`);
     }
 
     async getDetail(url) {
@@ -105,12 +136,11 @@ class DefaultExtension extends MProvider {
         const genre = doc.select("div.video-tags a.label").map(el => el.text.trim());
         const status = 1; // Completed
         
-        // Each post is a single episode, using the same URL as the detail page.
         const chapters = [{ name: name, url: url }];
 
         return {
             name,
-            imageUrl: "", // App will use the thumbnail from the list view.
+            imageUrl: "",
             genre,
             status,
             chapters,
