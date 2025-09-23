@@ -54,13 +54,12 @@ class DefaultExtension extends MProvider {
         return { name, imageUrl: imageUrl || "", link };
     }
 
-    // Helper for paginated category pages and search results
-    async _getPaginatedResults(path) {
+    async _getAnimePage(path) {
         const baseUrl = this.getBaseUrl();
         const res = await this.client.get(baseUrl + path, this.getHeaders());
         const doc = new Document(res.body);
         
-        const list = doc.select("div.videos-list article.thumb-block, article.thumb-block")
+        const list = doc.select("div.videos-list article.thumb-block")
             .map(el => this._parseAnimeFromElement(el))
             .filter(Boolean);
 
@@ -72,10 +71,9 @@ class DefaultExtension extends MProvider {
         const baseUrl = this.getBaseUrl();
         if (page > 1) {
             const pagePath = `page/${page}/`;
-            return this._getPaginatedResults(`/category/engsub/${pagePath}?filter=latest`);
+            return this._getAnimePage(`/category/engsub/${pagePath}?filter=latest`);
         }
 
-        // For page 1, parse the home page's "English/Spanish Subbed" section
         const res = await this.client.get(baseUrl, this.getHeaders());
         const doc = new Document(res.body);
         const widgets = doc.select("section.widget_videos_block");
@@ -96,10 +94,9 @@ class DefaultExtension extends MProvider {
         const baseUrl = this.getBaseUrl();
         if (page > 1) {
             const pagePath = `page/${page}/`;
-            return this._getPaginatedResults(`/category/new-releases/${pagePath}?filter=latest`);
+            return this._getAnimePage(`/category/new-releases/${pagePath}?filter=latest`);
         }
 
-        // For page 1, parse the home page's "New Releases" section
         const res = await this.client.get(baseUrl, this.getHeaders());
         const doc = new Document(res.body);
         const widgets = doc.select("section.widget_videos_block");
@@ -118,7 +115,16 @@ class DefaultExtension extends MProvider {
 
     async search(query, page, filters) {
         const pagePath = page > 1 ? `/page/${page}/` : '';
-        return this._getPaginatedResults(`${pagePath}?s=${encodeURIComponent(query)}`);
+        const url = `${this.getBaseUrl()}${pagePath}?s=${encodeURIComponent(query)}`;
+        const res = await this.client.get(url, this.getHeaders());
+        const doc = new Document(res.body);
+        
+        const list = doc.select("article.thumb-block")
+            .map(el => this._parseAnimeFromElement(el))
+            .filter(Boolean);
+
+        const hasNextPage = !!doc.selectFirst("a:contains(Next)");
+        return { list, hasNextPage };
     }
 
     async getDetail(url) {
@@ -133,6 +139,10 @@ class DefaultExtension extends MProvider {
         }
         const name = titleElement.text.trim();
         
+        // Fetch image from meta tag for better quality.
+        const metaImage = doc.selectFirst('meta[property="og:image"]');
+        const imageUrl = metaImage ? metaImage.attr("content") : "";
+
         const genre = doc.select("div.video-tags a.label").map(el => el.text.trim());
         const status = 1; // Completed
         
@@ -140,7 +150,7 @@ class DefaultExtension extends MProvider {
 
         return {
             name,
-            imageUrl: "",
+            imageUrl,
             genre,
             status,
             chapters,
@@ -163,7 +173,8 @@ class DefaultExtension extends MProvider {
                 const sourcesMatch = scriptText.match(/sources:\s*(\[.*?\])/);
                 if (sourcesMatch && sourcesMatch[1]) {
                     try {
-                        const sourcesArray = JSON.parse(sourcesMatch[1].replace(/\\/g, ''));
+                        // Let the native JSON parser handle escapes.
+                        const sourcesArray = JSON.parse(sourcesMatch[1]);
                         for (const source of sourcesArray) {
                             let fileUrl = source.file;
                             if (fileUrl.startsWith("//")) {
@@ -197,22 +208,6 @@ class DefaultExtension extends MProvider {
                     } catch (e) { /* Ignore API errors */ }
                 }
                 if (videos.length > 0) break;
-            }
-        }
-        
-        if (videos.length === 0) {
-            const buttons = doc.select("div.text-center.list-server li button");
-            for (const button of buttons) {
-                const embedHtml = button.attr("data-embed");
-                const srcMatch = embedHtml.match(/src=(?:"|&quot;)([^"&]+)/);
-                if (srcMatch && srcMatch[1]) {
-                    let embedUrl = srcMatch[1];
-                    if (embedUrl.startsWith("//")) {
-                        embedUrl = "https:" + embedUrl;
-                    }
-                    const serverName = button.text.trim();
-                    videos.push({ url: embedUrl, originalUrl: embedUrl, quality: serverName });
-                }
             }
         }
         
