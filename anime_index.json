@@ -660,6 +660,28 @@
         "notes": ""
     },
     {
+        "name": "Hentai JP",
+        "id": 8172938104,
+        "baseUrl": "https://hentai.jp",
+        "lang": "en",
+        "typeSource": "single",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=hentai.jp",
+        "dateFormat": "",
+        "dateFormatLocale": "",
+        "isNsfw": true,
+        "hasCloudflare": false,
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/en/hentaijp.js",
+        "apiUrl": "",
+        "version": "1.0.0",
+        "isManga": false,
+        "itemType": 1,
+        "isFullData": false,
+        "appMinVerReq": "0.5.0",
+        "additionalParams": "",
+        "sourceCodeLanguage": 1,
+        "notes": ""
+    },
+    {
         "name": "HentaiMama",
         "id": 9876543210,
         "baseUrl": "https://hentaimama.io",
