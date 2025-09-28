@@ -12,6 +12,7 @@ const mangayomiSources = [{
     "pkgPath": "anime/src/en/watchhentai.js"
 }];
 
+
 class DefaultExtension extends MProvider {
     constructor() {
         super();
@@ -105,126 +106,172 @@ class DefaultExtension extends MProvider {
     }
 
     async getDetail(url) {
+        // If the provided URL is an episode page, find the main series page URL first.
+        // This ensures we always get the full series details and episode list.
+        if (url.includes("/videos/")) {
+            const initialRes = await this.client.get(url, this.getHeaders(url));
+            const initialDoc = new Document(initialRes.body);
+            const seriesLinkElement = initialDoc.selectFirst("div.pag_episodes a:has(i.fa-bars), div#serie_contenido a");
+            if (seriesLinkElement) {
+                url = seriesLinkElement.getHref;
+            } else {
+                // Fallback for single-episode videos that might not link back to a series page.
+                return this.parseEpisodePageAsSeries(initialDoc, url);
+            }
+        }
+
+        // Fetch and parse the series page.
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
-        
+        return this.parseSeriesPage(doc, url);
+    }
+
+    parseSeriesPage(doc, url) {
         const name = doc.selectFirst("div.data h1").text.trim();
-        const imageUrl = doc.selectFirst("div.poster img")?.getSrc;
-        const description = doc.selectFirst("div#description p")?.text?.trim() ?? "";
+        const img = doc.selectFirst("div.poster img");
+        const imageUrl = img?.attr("data-src") || img?.getSrc;
         const link = url;
-        const status = 1; // Completed
+        const status = 1;
 
+        let description = doc.selectFirst("div#description p")?.text?.trim() ?? "";
+        
+        const details = [];
+        const censorship = doc.selectFirst("div.buttonuncensured, div.buttoncensured")?.text?.trim();
+        if (censorship) details.push(`Censorship: ${censorship === 'UNC' ? 'Uncensored' : 'Censored'}`);
+
+        const rating = doc.selectFirst("div.starstruck")?.attr("data-rating");
+        if (rating) {
+            let ratingText = `Rating: ${rating}/10`;
+            const ratingCount = doc.selectFirst("span.rating-count")?.text;
+            if (ratingCount) ratingText += ` (${ratingCount} votes)`;
+            details.push(ratingText);
+        }
+
+        const favCount = doc.selectFirst("a.clicklogin:has(i.fa-plus-circle) > span")?.text;
+        if(favCount) details.push(`Favorites: ${favCount}`);
+
+        doc.select("div.sbox div.custom_fields").forEach(element => {
+            const key = element.selectFirst("b.variante")?.text?.trim();
+            const value = element.selectFirst("span.valor")?.text?.trim();
+            if (key && value) {
+                details.push(`${key}: ${value}`);
+            }
+        });
+
+        if (details.length > 0) {
+            description += `\n\n----\n${details.join('\n')}`;
+        }
+    
         const genre = doc.select("div.sgeneros a").map(el => el.text.trim());
-
+    
         const chapters = [];
-        const episodeElements = doc.select("ul.episodios li");
-        for (const element of episodeElements) {
-            const a = element.selectFirst("a");
-            if (!a) continue;
-            
-            const epName = element.selectFirst("h3").text.trim();
-            const epUrl = a.getHref;
-            chapters.push({ name: epName, url: epUrl });
+        doc.select("ul.episodios > li").forEach(element => {
+            const a = element.selectFirst("div.episodiotitle a");
+            if (a) {
+                chapters.push({ name: a.text.trim(), url: a.getHref });
+            }
+        });
+        
+        chapters.reverse();
+    
+        return { name, imageUrl, description, link, status, genre, chapters };
+    }
+
+    parseEpisodePageAsSeries(doc, url) {
+        const headerText = doc.selectFirst("h3 > strong")?.text ?? "Episode";
+        const name = headerText.replace(/episode\s*\d+/i, '').replace(/stream|english subbed/gi, '').trim();
+        const imageUrl = doc.selectFirst('meta[itemprop="thumbnailUrl"]')?.attr("content");
+        const description = doc.selectFirst("div.synopsis p")?.text?.replace("Synopsis:", "").trim() ?? "No description available.";
+        const genre = doc.select("nav.genres li a").map(el => el.text.trim());
+        const chapters = [];
+        
+        doc.select("div#seasons ul.episodios > li").forEach(element => {
+            const a = element.selectFirst("div.episodiotitle a");
+            if (a) {
+                chapters.push({ name: a.text.trim(), url: a.getHref });
+            }
+        });
+
+        if (chapters.length === 0) {
+             chapters.push({ name: headerText, url: url });
         }
         
         chapters.reverse();
 
-        return { name, imageUrl, description, link, status, genre, chapters };
+        return { name, imageUrl, description, link: url, status: 1, genre, chapters };
     }
+
 
     async getVideoList(url) {
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
-
-        const postIdMatch = doc.body.attr("class").match(/postid-(\d+)/);
-        if (!postIdMatch) return [];
-
-        const postId = postIdMatch[1];
-        const servers = doc.select("li.dooplay_player_option");
         const videoList = [];
 
-        for (const server of servers) {
-            const serverName = server.text.trim();
-            const nume = server.attr("data-nume");
-            
-            const ajaxUrl = `${this.getBaseUrl()}/wp-admin/admin-ajax.php`;
-            const ajaxHeaders = {
-                ...this.getHeaders(ajaxUrl),
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            };
-
+        const downloadPageLink = doc.selectFirst("a.download-video")?.getHref;
+        if (downloadPageLink) {
             try {
-                const ajaxRes = await this.client.post(ajaxUrl, { "action": `doo_player_ajax`, "post": postId, "nume": nume, "type": "movie" }, ajaxHeaders);
-                const embedData = JSON.parse(ajaxRes.body);
-                const embedUrlMatch = embedData.embed_url.match(/src="([^"]+)"/);
-                
-                if (embedUrlMatch) {
-                    const embedUrl = embedUrlMatch[1];
-                    // Example extractor for Vidmoly
-                    if (embedUrl.includes("vidmoly")) {
-                        const embedRes = await this.client.get(embedUrl, this.getHeaders(embedUrl));
-                        const m3u8Match = embedRes.body.match(/file:"([^"]+\.m3u8)"/);
-                        if (m3u8Match) {
-                            const m3u8Url = m3u8Match[1];
-                            const masterPlaylistVideos = await this.parseHls(m3u8Url, serverName);
-                            videoList.push(...masterPlaylistVideos);
+                const downloadPageRes = await this.client.get(downloadPageLink, this.getHeaders(downloadPageLink));
+                const downloadDoc = new Document(downloadPageRes.body);
+                const qualityButtons = downloadDoc.select("div._4continuar > button:has(i.fa-download)");
+
+                for (const button of qualityButtons) {
+                    const onclickAttr = button.attr("onclick");
+                    const quality = button.text.trim();
+                    if (onclickAttr) {
+                        const urlMatch = onclickAttr.match(/'(https?:\/\/[^']+)'/);
+                        if (urlMatch && urlMatch[1] && urlMatch[1].includes("xupload.org/download")) {
+                            const finalUrl = urlMatch[1].replace("xupload.org/download", "hstorage.xyz/files") + "?download=1";
+                            videoList.push({ url: finalUrl, originalUrl: finalUrl, quality: quality, headers: this.getHeaders(finalUrl) });
                         }
                     }
                 }
-            } catch (e) {
-                // Ignore server if it fails
+            } catch (e) { /* Method failed */ }
+        }
+
+        if (videoList.length > 0) {
+            videoList.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
+            const preferredQuality = this.getPreference("preferred_quality");
+            if (preferredQuality !== "ask") {
+                let targetStream = videoList.find(q => q.quality.includes(preferredQuality)) ||
+                                 videoList.find(q => parseInt(q.quality) <= parseInt(preferredQuality));
+                if (preferredQuality === "best") targetStream = videoList[0];
+                if (preferredQuality === "worst") targetStream = videoList[videoList.length - 1];
+                
+                if (targetStream) {
+                    const index = videoList.indexOf(targetStream);
+                    if (index > 0) videoList.unshift(videoList.splice(index, 1)[0]);
+                }
             }
         }
 
-        return videoList;
-    }
-
-    async parseHls(masterPlaylistUrl, qualityPrefix) {
-        const parsedQualities = [];
-        try {
-            if (this.getPreference("iptv_extract_qualities") && masterPlaylistUrl.toLowerCase().includes('.m3u8')) {
-                const masterPlaylistContent = (await this.client.get(masterPlaylistUrl, this.getHeaders(masterPlaylistUrl))).body;
-                const regex = /#EXT-X-STREAM-INF:.*(?:RESOLUTION=(\d+x\d+)|BANDWIDTH=(\d+)).*\n(?!#)(.+)/g;
-                let match;
-                const baseUrl = masterPlaylistUrl.substring(0, masterPlaylistUrl.lastIndexOf('/') + 1);
-                
-                while ((match = regex.exec(masterPlaylistContent)) !== null) {
-                    const resolution = match[1];
-                    const bandwidth = match[2];
-                    let qualityName = resolution ? `${resolution.split('x')[1]}p` : `${Math.round(parseInt(bandwidth) / 1000)}kbps`;
-                    if (qualityPrefix) qualityName = `${qualityPrefix}: ${qualityName}`;
-                    let streamUrl = match[3].trim();
-                    if (!streamUrl.startsWith('http')) streamUrl = baseUrl + streamUrl;
-                    parsedQualities.push({ url: streamUrl, originalUrl: streamUrl, quality: qualityName, headers: this.getHeaders(streamUrl) });
-                }
-
-                if (parsedQualities.length > 0) {
-                    parsedQualities.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
-                    
-                    const preferredQuality = this.getPreference("preferred_quality");
-                    if (preferredQuality !== "ask") {
-                        let targetStream = parsedQualities.find(q => q.quality.includes(preferredQuality)) ||
-                                           parsedQualities.find(q => parseInt(q.quality) <= parseInt(preferredQuality));
-                        
-                        if (preferredQuality === "best") targetStream = parsedQualities[0];
-                        if (preferredQuality === "worst") targetStream = parsedQualities[parsedQualities.length - 1];
-
-                        if (targetStream) {
-                            const index = parsedQualities.indexOf(targetStream);
-                            if (index > 0) {
-                                const [item] = parsedQualities.splice(index, 1);
-                                parsedQualities.unshift(item);
+        if (videoList.length === 0) {
+            const postIdMatch = doc.body.attr("class").match(/postid-(\d+)/);
+            if (postIdMatch) {
+                const postId = postIdMatch[1];
+                const servers = doc.select("ul#playeroptionsul > li.dooplay_player_option");
+                for (const server of servers) {
+                    const serverName = server.text.trim();
+                    const nume = server.attr("data-nume");
+                    const ajaxUrl = `${this.getBaseUrl()}/wp-admin/admin-ajax.php`;
+                    const ajaxHeaders = { ...this.getHeaders(ajaxUrl), "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" };
+                    try {
+                        const ajaxRes = await this.client.post(ajaxUrl, { "action": `doo_player_ajax`, "post": postId, "nume": nume, "type": "movie" }, ajaxHeaders);
+                        const embedData = JSON.parse(ajaxRes.body);
+                        const embedUrlMatch = embedData.embed_url.match(/src="([^"]+)"/);
+                        if (embedUrlMatch && embedUrlMatch[1]) {
+                            const sourceParam = new URL(embedUrlMatch[1]).searchParams.get('source');
+                            if (sourceParam) {
+                                const videoUrl = decodeURIComponent(sourceParam);
+                                videoList.push({ url: videoUrl, originalUrl: videoUrl, quality: serverName, headers: this.getHeaders(videoUrl) });
                             }
                         }
-                    }
+                    } catch (e) { /* Ignore */ }
                 }
             }
-        } catch (e) { /* Fall through */ }
+        }
         
-        parsedQualities.push({ url: masterPlaylistUrl, originalUrl: masterPlaylistUrl, quality: `${qualityPrefix}: Auto (HLS)`, headers: this.getHeaders(masterPlaylistUrl) });
-        return parsedQualities;
+        return videoList;
     }
-
 
     getFilterList() {
         const sortOptions = [
@@ -251,7 +298,6 @@ class DefaultExtension extends MProvider {
         ];
 
         const toOption = (item) => ({ type_name: "SelectOption", name: item.name, value: item.value });
-
         const genreOptions = [{ type_name: "SelectOption", name: "Any", value: "" }, ...genres.sort((a, b) => a.name.localeCompare(b.name)).map(toOption)];
 
         return [
@@ -275,20 +321,12 @@ class DefaultExtension extends MProvider {
                 }
             },
             {
-                key: "iptv_extract_qualities",
-                switchPreferenceCompat: {
-                    title: "Enable Stream Quality Extraction",
-                    summary: "If a video provides multiple qualities (HLS/M3U8), this will list them. May not work for all videos.",
-                    value: true,
-                }
-            },
-            {
                 key: "preferred_quality",
                 listPreference: {
                     title: "Preferred Quality",
                     summary: "Select the quality to play by default. All other qualities will still be available.",
-                    entries: ["Best", "Worst", "1080p", "720p", "480p", "Ask"],
-                    entryValues: ["best", "worst", "1080", "720", "480", "ask"],
+                    entries: ["Best", "Worst", "1440p", "1080p", "720p", "480p", "Ask"],
+                    entryValues: ["best", "worst", "1440", "1080", "720", "480", "ask"],
                     valueIndex: 0
                 }
             },
