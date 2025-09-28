@@ -4,13 +4,14 @@ const mangayomiSources = [{
     "lang": "en",
     "baseUrl": "https://watchhentai.net",
     "apiUrl": "",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=watchhentai.net",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=https://watchhentai.net",
     "typeSource": "single",
     "isNsfw": true,
     "itemType": 1,
     "version": "1.0.0",
     "pkgPath": "anime/src/en/watchhentai.js"
 }];
+
 
 
 class DefaultExtension extends MProvider {
@@ -35,7 +36,7 @@ class DefaultExtension extends MProvider {
         return {
             "Referer": this.getBaseUrl(),
             "Origin": this.getBaseUrl(),
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.- (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
         };
     }
 
@@ -48,35 +49,42 @@ class DefaultExtension extends MProvider {
     
     async getLatestUpdates(page) {
         const url = page === 1
-            ? `${this.getBaseUrl()}/series/?orderby=latest`
-            : `${this.getBaseUrl()}/series/page/${page}/?orderby=latest`;
+            ? `${this.getBaseUrl()}/videos/`
+            : `${this.getBaseUrl()}/videos/page/${page}/`;
         return this.parseDirectory(url);
     }
 
     async search(query, page, filters) {
         const baseUrl = this.getBaseUrl();
-        const sortFilter = filters.find(f => f.name === "Sort by");
-        const sortValue = sortFilter ? sortFilter.values[sortFilter.state].value : "";
-        const genreFilter = filters.find(f => f.name === "Genre");
-        const genreValue = genreFilter ? genreFilter.values[genreFilter.state].value : "";
-
-        let url;
-        const params = new URLSearchParams();
-
+        
         if (query) {
-            url = page > 1 ? `${baseUrl}/page/${page}/` : `${baseUrl}/`;
-            params.set('s', query);
-        } else if (genreValue) {
-            url = `${baseUrl}/genre/${genreValue}/` + (page > 1 ? `page/${page}/` : '');
-        } else {
-            url = `${baseUrl}/series/` + (page > 1 ? `page/${page}/` : '');
+            let url = `${baseUrl}/`;
+            if (page > 1) url += `page/${page}/`;
+            const params = new URLSearchParams({ s: query });
+            return this.parseDirectory(`${url}?${params}`);
         }
 
-        if (sortValue) {
-            params.set('orderby', sortValue);
+        const listingFilter = filters.find(f => f.name === "Content Type");
+        const listingValue = listingFilter ? listingFilter.values[listingFilter.state].value : "series";
+
+        let path;
+        if (listingValue === "genre") {
+            const genreFilter = filters.find(f => f.name === "Genre");
+            const genreValue = genreFilter ? genreFilter.values[genreFilter.state].value : "";
+            path = genreValue ? `/genre/${genreValue}/` : '/series/';
+        } else if (listingValue === "year") {
+            const yearFilter = filters.find(f => f.name === "Year");
+            const yearValue = yearFilter ? yearFilter.values[yearFilter.state].value : "";
+            path = yearValue ? `/release/${yearValue}/` : '/series/';
+        } else {
+            path = `/series/`;
+        }
+
+        let finalUrl = `${baseUrl}${path}`;
+        if (page > 1) {
+            finalUrl += `page/${page}/`;
         }
         
-        const finalUrl = url + (params.toString() ? '?' + params.toString() : '');
         return this.parseDirectory(finalUrl);
     }
 
@@ -84,21 +92,31 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
         const list = [];
-        
-        const items = doc.select("article.item.tvshows");
 
-        for (const item of items) {
-            const a = item.selectFirst("div.data h3 a");
-            if (!a) continue;
-
-            const name = a.text.trim();
-            const link = a.getHref;
-            const img = item.selectFirst("div.poster img");
-            const imageUrl = img?.attr("data-src") || img?.getSrc;
-
-            if (name && link && imageUrl) {
-                list.push({ name, imageUrl, link });
-            }
+        if (url.includes("/videos/")) { // Recent Episodes Parser
+            doc.select("article.item.se.episodes").forEach(item => {
+                const a = item.selectFirst("div.data a");
+                if (a) {
+                    const seriesName = a.selectFirst("strong > span.serie")?.text ?? '';
+                    const episodeNum = a.selectFirst("h3")?.text ?? '';
+                    const name = `${seriesName} - ${episodeNum}`.replace(/^- | -$/g, '').trim();
+                    const link = a.getHref;
+                    const img = item.selectFirst("div.poster img");
+                    const imageUrl = img?.attr("data-src") || img?.getSrc;
+                    if (name && link && imageUrl) list.push({ name, imageUrl, link });
+                }
+            });
+        } else { // Series Parser
+            doc.select("article.item.tvshows").forEach(item => {
+                const a = item.selectFirst("div.data h3 a");
+                if (a) {
+                    const name = a.text.trim();
+                    const link = a.getHref;
+                    const img = item.selectFirst("div.poster img");
+                    const imageUrl = img?.attr("data-src") || img?.getSrc;
+                    if (name && link && imageUrl) list.push({ name, imageUrl, link });
+                }
+            });
         }
         
         const hasNextPage = doc.selectFirst("a.arrow_pag:has(i#nextpagination)") != null;
@@ -106,21 +124,16 @@ class DefaultExtension extends MProvider {
     }
 
     async getDetail(url) {
-        // If the provided URL is an episode page, find the main series page URL first.
-        // This ensures we always get the full series details and episode list.
         if (url.includes("/videos/")) {
             const initialRes = await this.client.get(url, this.getHeaders(url));
             const initialDoc = new Document(initialRes.body);
-            const seriesLinkElement = initialDoc.selectFirst("div.pag_episodes a:has(i.fa-bars), div#serie_contenido a");
+            const seriesLinkElement = initialDoc.selectFirst("div.pag_episodes a:has(i.fa-bars), a.lnk-serie");
             if (seriesLinkElement) {
                 url = seriesLinkElement.getHref;
             } else {
-                // Fallback for single-episode videos that might not link back to a series page.
                 return this.parseEpisodePageAsSeries(initialDoc, url);
             }
         }
-
-        // Fetch and parse the series page.
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
         return this.parseSeriesPage(doc, url);
@@ -130,10 +143,14 @@ class DefaultExtension extends MProvider {
         const name = doc.selectFirst("div.data h1").text.trim();
         const img = doc.selectFirst("div.poster img");
         const imageUrl = img?.attr("data-src") || img?.getSrc;
-        const link = url;
-        const status = 1;
-
-        let description = doc.selectFirst("div#description p")?.text?.trim() ?? "";
+        
+        let description = "";
+        const synopsisPs = doc.select("div.sbox div.wp-content p"); // New layout
+        if (synopsisPs.length > 0) {
+            description = synopsisPs.map(p => p.text.trim()).join('\n\n');
+        } else {
+            description = doc.selectFirst("div#description p")?.text?.trim() ?? ""; // Old layout
+        }
         
         const details = [];
         const censorship = doc.selectFirst("div.buttonuncensured, div.buttoncensured")?.text?.trim();
@@ -147,15 +164,10 @@ class DefaultExtension extends MProvider {
             details.push(ratingText);
         }
 
-        const favCount = doc.selectFirst("a.clicklogin:has(i.fa-plus-circle) > span")?.text;
-        if(favCount) details.push(`Favorites: ${favCount}`);
-
         doc.select("div.sbox div.custom_fields").forEach(element => {
             const key = element.selectFirst("b.variante")?.text?.trim();
             const value = element.selectFirst("span.valor")?.text?.trim();
-            if (key && value) {
-                details.push(`${key}: ${value}`);
-            }
+            if (key && value) details.push(`${key}: ${value}`);
         });
 
         if (details.length > 0) {
@@ -163,68 +175,49 @@ class DefaultExtension extends MProvider {
         }
     
         const genre = doc.select("div.sgeneros a").map(el => el.text.trim());
-    
-        const chapters = [];
-        doc.select("ul.episodios > li").forEach(element => {
+        const chapters = doc.select("ul.episodios > li").map(element => {
             const a = element.selectFirst("div.episodiotitle a");
-            if (a) {
-                chapters.push({ name: a.text.trim(), url: a.getHref });
-            }
-        });
-        
-        chapters.reverse();
+            return { name: a.text.trim(), url: a.getHref };
+        }).reverse();
     
-        return { name, imageUrl, description, link, status, genre, chapters };
+        return { name, imageUrl, description, link: url, status: 1, genre, chapters };
     }
 
     parseEpisodePageAsSeries(doc, url) {
         const headerText = doc.selectFirst("h3 > strong")?.text ?? "Episode";
         const name = headerText.replace(/episode\s*\d+/i, '').replace(/stream|english subbed/gi, '').trim();
         const imageUrl = doc.selectFirst('meta[itemprop="thumbnailUrl"]')?.attr("content");
-        const description = doc.selectFirst("div.synopsis p")?.text?.replace("Synopsis:", "").trim() ?? "No description available.";
+        const description = doc.selectFirst("div.synopsis p")?.text?.replace("Synopsis:", "").trim() ?? "No description.";
         const genre = doc.select("nav.genres li a").map(el => el.text.trim());
-        const chapters = [];
-        
-        doc.select("div#seasons ul.episodios > li").forEach(element => {
+        let chapters = doc.select("div#seasons ul.episodios > li").map(element => {
             const a = element.selectFirst("div.episodiotitle a");
-            if (a) {
-                chapters.push({ name: a.text.trim(), url: a.getHref });
-            }
-        });
+            return { name: a.text.trim(), url: a.getHref };
+        }).reverse();
 
-        if (chapters.length === 0) {
-             chapters.push({ name: headerText, url: url });
-        }
-        
-        chapters.reverse();
+        if (chapters.length === 0) chapters.push({ name: headerText, url: url });
 
         return { name, imageUrl, description, link: url, status: 1, genre, chapters };
     }
 
-
     async getVideoList(url) {
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
-        const videoList = [];
+        let videoList = [];
 
         const downloadPageLink = doc.selectFirst("a.download-video")?.getHref;
         if (downloadPageLink) {
             try {
                 const downloadPageRes = await this.client.get(downloadPageLink, this.getHeaders(downloadPageLink));
                 const downloadDoc = new Document(downloadPageRes.body);
-                const qualityButtons = downloadDoc.select("div._4continuar > button:has(i.fa-download)");
-
-                for (const button of qualityButtons) {
+                videoList = downloadDoc.select("div._4continuar > button:has(i.fa-download)").map(button => {
                     const onclickAttr = button.attr("onclick");
-                    const quality = button.text.trim();
-                    if (onclickAttr) {
-                        const urlMatch = onclickAttr.match(/'(https?:\/\/[^']+)'/);
-                        if (urlMatch && urlMatch[1] && urlMatch[1].includes("xupload.org/download")) {
-                            const finalUrl = urlMatch[1].replace("xupload.org/download", "hstorage.xyz/files") + "?download=1";
-                            videoList.push({ url: finalUrl, originalUrl: finalUrl, quality: quality, headers: this.getHeaders(finalUrl) });
-                        }
+                    const urlMatch = onclickAttr.match(/'(https?:\/\/[^']+)'/);
+                    if (urlMatch && urlMatch[1] && urlMatch[1].includes("xupload.org/download")) {
+                        const finalUrl = urlMatch[1].replace("xupload.org/download", "hstorage.xyz/files") + "?download=1";
+                        return { url: finalUrl, originalUrl: finalUrl, quality: button.text.trim(), headers: this.getHeaders(finalUrl) };
                     }
-                }
+                    return null;
+                }).filter(Boolean);
             } catch (e) { /* Method failed */ }
         }
 
@@ -236,11 +229,7 @@ class DefaultExtension extends MProvider {
                                  videoList.find(q => parseInt(q.quality) <= parseInt(preferredQuality));
                 if (preferredQuality === "best") targetStream = videoList[0];
                 if (preferredQuality === "worst") targetStream = videoList[videoList.length - 1];
-                
-                if (targetStream) {
-                    const index = videoList.indexOf(targetStream);
-                    if (index > 0) videoList.unshift(videoList.splice(index, 1)[0]);
-                }
+                if (targetStream) videoList.unshift(videoList.splice(videoList.indexOf(targetStream), 1)[0]);
             }
         }
 
@@ -269,44 +258,67 @@ class DefaultExtension extends MProvider {
                 }
             }
         }
-        
         return videoList;
     }
 
     getFilterList() {
-        const sortOptions = [
-            { name: "Default", value: "" }, { name: "Latest", value: "latest" },
-            { name: "Popular", value: "popular" }, { name: "Rating", value: "rating" },
-            { name: "Title A-Z", value: "title_a-z" }, { name: "Title Z-A", value: "title_z-a" },
-        ];
-        
-        const genres = [
-            { name: '3D', value: '3d' }, { name: 'Action', value: 'action' }, { name: 'Ahegao', value: 'ahegao' },
-            { name: 'Anal', value: 'anal' }, { name: 'Big Tits', value: 'big-tits' }, { name: 'Bondage', value: 'bondage' },
-            { name: 'Bukkake', value: 'bukkake' }, { name: 'Cosplay', value: 'cosplay' }, { name: 'Creampie', value: 'creampie' },
-            { name: 'Dark Skin', value: 'dark-skin' }, { name: 'Demons', value: 'demons' }, { name: 'Futanari', value: 'futanari' },
-            { name: 'Gangbang', value: 'gangbang' }, { name: 'Glasses', value: 'glasses' }, { name: 'Harem', value: 'harem' },
-            { name: 'Incest', value: 'incest' }, { name: 'Inflation', value: 'inflation' }, { name: 'Lactation', value: 'lactation' },
-            { name: 'Loli', value: 'loli' }, { name: 'Masturbation', value: 'masturbation' }, { name: 'Milf', value: 'milf' },
-            { name: 'Mind Break', value: 'mind-break' }, { name: 'Monster', value: 'monster' }, { name: 'Neko', value: 'neko' },
-            { name: 'Netorare', value: 'netorare' }, { name: 'Paizuri', value: 'paizuri' }, { name: 'Rape', value: 'rape' },
-            { name: 'Reverse Rape', value: 'reverse-rape' }, { name: 'School Girl', value: 'school-girl' }, { name: 'Scorn', value: 'scorn' },
-            { name: 'Sex Toys', value: 'sex-toys' }, { name: 'Shotacon', value: 'shotacon' }, { name: 'Succubus', value: 'succubus' },
-            { name: 'Tentacles', value: 'tentacles' }, { name: 'Threesome', value: 'threesome' }, { name: 'Trap', value: 'trap' },
-            { name: 'Tsundere', value: 'tsundere' }, { name: 'Vanilla', value: 'vanilla' }, { name: 'X-Ray', value: 'x-ray' },
-            { name: 'Yaoi', value: 'yaoi' }, { name: 'Yuri', value: 'yuri' }
-        ];
-
         const toOption = (item) => ({ type_name: "SelectOption", name: item.name, value: item.value });
-        const genreOptions = [{ type_name: "SelectOption", name: "Any", value: "" }, ...genres.sort((a, b) => a.name.localeCompare(b.name)).map(toOption)];
-
+        const genres = [
+            { name: '3D', value: '3d' },
+            { name: 'Ahegao', value: 'ahegao' },
+            { name: 'Anal', value: 'anal' },
+            { name: 'Blackmail', value: 'blackmail' },
+            { name: 'Blowjob', value: 'blowjob' },
+            { name: 'Bondage', value: 'bondage' },
+            { name: 'Bukakke', value: 'bukakke' },
+            { name: 'Censored', value: 'censored' },
+            { name: 'Comedy', value: 'comedy' },
+            { name: 'Creampie', value: 'creampie' },
+            { name: 'Dark Skin', value: 'dark-skin' },
+            { name: 'Deepthroat', value: 'deepthroat' },
+            { name: 'Demons', value: 'demons' },
+            { name: 'Double Penatration', value: 'double-penatration' },
+            { name: 'Elf', value: 'elf' },
+            { name: 'Facial', value: 'facial' },
+            { name: 'Fantasy', value: 'fantasy' },
+            { name: 'Femdom', value: 'femdom' },
+            { name: 'Futanari', value: 'futanari' },
+            { name: 'Gangbang', value: 'gangbang' },
+            { name: 'Harem', value: 'harem' },
+            { name: 'Horny Slut', value: 'horny-slut' },
+            { name: 'Incest', value: 'incest' },
+            { name: 'Lolicon', value: 'lolicon' },
+            { name: 'Large Breasts', value: 'large-breasts' },
+            { name: 'Milf', value: 'milf' },
+            { name: 'NTR', value: 'ntr' },
+            { name: 'Public Sex', value: 'public-sex' },
+            { name: 'Rape', value: 'rape' },
+            { name: 'School Girls', value: 'school-girls' },
+            { name: 'Super Power', value: 'super-power' },
+            { name: 'Supernatural', value: 'supernatural' },
+            { name: 'Tits Fuck', value: 'tits-fuck' },
+            { name: 'Toys', value: 'toys' },
+            { name: 'Uncensored', value: 'uncensored' },
+            { name: 'Vanilla', value: 'vanilla-id-1' },
+            { name: 'X-ray', value: 'x-ray' },
+            { name: 'Yuri', value: 'yuri' }
+        ];
+        const yearOptions = [{ type_name: "SelectOption", name: "Any", value: "" }];
+        for (let y = new Date().getFullYear() + 2; y >= 1999; y--) {
+            yearOptions.push({ type_name: "SelectOption", name: y.toString(), value: y.toString() });
+        }
         return [
-            { type_name: "HeaderFilter", name: "NOTE: Text search overrides Genre filter." },
+            { type_name: "HeaderFilter", name: "NOTE: Search query overrides all filters." },
             { 
-                type_name: "SelectFilter", name: "Sort by", state: 0, 
-                values: sortOptions.map(s => ({ type_name: "SelectOption", name: s.name, value: s.value })) 
+                type_name: "SelectFilter", name: "Content Type", state: 0, 
+                values: [ 
+                    { name: "All Series", value: "series" },
+                    { name: "Filter by Genre", value: "genre" },
+                    { name: "Filter by Year", value: "year" }
+                ].map(toOption)
             },
-            { type_name: "SelectFilter", name: "Genre", state: 0, values: genreOptions },
+            { type_name: "SelectFilter", name: "Genre", state: 0, values: [{ type_name: "SelectOption", name: "Any", value: "" }, ...genres.sort((a, b) => a.name.localeCompare(b.name)).map(toOption)] },
+            { type_name: "SelectFilter", name: "Year", state: 0, values: yearOptions },
         ];
     }
 
@@ -316,7 +328,7 @@ class DefaultExtension extends MProvider {
                 key: "enable_latest_tab",
                 switchPreferenceCompat: {
                     title: "Enable 'Latest' Tab",
-                    summary: "Toggles the visibility of the 'Latest' tab for this source.",
+                    summary: "Shows the most recently added episodes.",
                     value: true,
                 }
             },
