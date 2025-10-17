@@ -44,7 +44,7 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
 
         const list = [];
-        const items = doc.select(".anime-card-container, div.row.posts-row article");
+        const items = doc.select("div.anime-card-themex, div.row.posts-row article");
 
         for (const item of items) {
             const linkElement = item.selectFirst("div.anime-card-title h3 a, h3.post-title a");
@@ -147,7 +147,7 @@ class DefaultExtension extends MProvider {
         const genre = doc.select("ul.anime-genres > li > a").map(e => e.text);
 
         const chapters = [];
-        const episodeElements = doc.select(".episodes-card-title h3 a");
+        const episodeElements = doc.select("div.episodes-list-content div.pinned-card a.badge.light-soft");
         for (const element of episodeElements) {
             chapters.push({
                 name: element.text.trim(),
