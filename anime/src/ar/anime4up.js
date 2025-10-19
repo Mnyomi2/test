@@ -44,24 +44,28 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
 
         const list = [];
-        const items = doc.select("div.anime-card-themex, div.row.posts-row article");
+        const items = doc.select("div.anime-card-themex");
 
         for (const item of items) {
-            const linkElement = item.selectFirst("div.anime-card-title h3 a, h3.post-title a");
-            const imageElement = item.selectFirst("img.img-responsive");
+            const linkElement = item.selectFirst("div.anime-card-title h3 a");
+            const imageElement = item.selectFirst("img");
 
             if (linkElement && imageElement) {
                 const name = linkElement.text.trim();
                 const link = linkElement.getHref.replace(/^https?:\/\/[^\/]+/, '');
-                const imageUrl = imageElement.getSrc;
-                list.push({ name, imageUrl, link });
+                
+                const imageUrl = imageElement.attr('data-image');
+                
+                if (imageUrl) {
+                    list.push({ name, imageUrl, link });
+                }
             }
         }
 
-        // This selector works for both text search and filter page pagination buttons.
         const hasNextPage = doc.selectFirst("ul.pagination li a[href*='page='], a.next.page-numbers") != null;
         return { list, hasNextPage };
     }
+
 
     getNumericQuality(quality) {
         const q = quality.toLowerCase();
@@ -179,33 +183,55 @@ class DefaultExtension extends MProvider {
     }
 
     async getVideoList(url) {
-        const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
+        const episodeUrl = this.getBaseUrl() + url;
+        const res = await this.client.get(episodeUrl, this.getHeaders(episodeUrl));
         const doc = new Document(res.body);
-        let videos = [];
+
+        const nonceMatch = res.body.match(/window\.TxPlayerNonce\s*=\s*"([^"]+)"/);
+        if (!nonceMatch) return [];
+        const nonce = nonceMatch[1];
+
+        const videos = [];
         const hosterSelection = this.getPreference("hoster_selection") || ["Dood", "Voe", "Mp4upload", "Okru"];
-        const headers = this.getHeaders(this.getBaseUrl() + url);
+        const ajaxUrl = this.getBaseUrl() + "/wp-content/themes/Anime4up/Ajaxt/iframe.php";
 
         const linkElements = doc.select('#episode-servers li a');
         for (const element of linkElements) {
             try {
-                let streamUrl = element.attr('data-ep-url');
-                const qualityText = element.text.trim();
-                const serverName = qualityText.split(' - ')[0];
+                const postId = element.attr('data-id');
+                const nume = element.attr('data-i');
+                const type = element.attr('data-type');
 
+                if (!postId || !nume || !type) continue;
+
+                const payload = {
+                    'post': postId,
+                    'nume': nume,
+                    'type': type,
+                    '_ajax_nonce': nonce
+                };
+                
+                const postHeaders = this.getHeaders(episodeUrl);
+                postHeaders["X-Requested-With"] = "XMLHttpRequest";
+                
+                const ajaxRes = await this.client.post(ajaxUrl, payload, postHeaders);
+                const ajaxJson = JSON.parse(ajaxRes.body);
+
+                let streamUrl = ajaxJson.embed_url;
+                if (!streamUrl) continue;
                 if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
 
+                const qualityText = element.text.trim();
+                const serverName = qualityText.split(' - ')[0].trim();
                 const numericQuality = this.getNumericQuality(qualityText);
                 const finalQualityString = `${serverName} - ${numericQuality}`;
-
-                if (serverName.includes("Mp4upload") && hosterSelection.includes("Mp4upload")) {
+                
+                if (serverName.toLowerCase().includes("mp4upload") && hosterSelection.includes("Mp4upload")) {
                     videos.push(...(await this.mp4uploadExtractor(streamUrl, finalQualityString)));
-                } else if (serverName.includes("Dood") && hosterSelection.includes("Dood")) {
-                    videos.push({ url: streamUrl, quality: finalQualityString, headers });
-                } else if (serverName.includes("Ok.ru") && hosterSelection.includes("Okru")) {
-                    videos.push({ url: streamUrl, quality: finalQualityString, headers });
-                } else if (serverName.includes("Voe.sx") && hosterSelection.includes("Voe")) {
-                    videos.push({ url: streamUrl, quality: finalQualityString, headers });
+                } else if (hosterSelection.some(h => serverName.toLowerCase().includes(h.toLowerCase()))) {
+                    videos.push({ url: streamUrl, quality: finalQualityString, headers: { "Referer": streamUrl } });
                 }
+
             } catch (e) { /* Ignore errors from single hoster */ }
         }
 
