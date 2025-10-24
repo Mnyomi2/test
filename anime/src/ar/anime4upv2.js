@@ -58,15 +58,21 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
         const list = [];
-        for (const item of doc.select(".anime-card-container, div.row.posts-row article")) {
-            const linkElement = item.selectFirst("div.anime-card-title h3 a, h3.post-title a");
-            const imageElement = item.selectFirst("img.img-responsive");
+        // FIX: Use correct selector for anime items
+        for (const item of doc.select("div.anime-card-themex")) {
+            // FIX: Use correct selector for title/link
+            const linkElement = item.selectFirst("div.anime-card-title h3 a");
+            // FIX: Use correct selector for image and get 'data-image' attribute
+            const imageElement = item.selectFirst("img");
             if (linkElement && imageElement) {
-                list.push({
-                    name: linkElement.text.trim(),
-                    link: linkElement.getHref.replace(/^https?:\/\/[^\/]+/, ''),
-                    imageUrl: imageElement.getSrc
-                });
+                const imageUrl = imageElement.attr('data-image');
+                if (imageUrl) {
+                    list.push({
+                        name: linkElement.text.trim(),
+                        link: linkElement.getHref.replace(/^https?:\/\/[^\/]+/, ''),
+                        imageUrl: imageUrl
+                    });
+                }
             }
         }
         const hasNextPage = doc.selectFirst("ul.pagination li a[href*='page='], a.next.page-numbers") != null;
@@ -129,17 +135,61 @@ class DefaultExtension extends MProvider {
     async getDetail(url) {
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
         const doc = new Document(res.body);
-        const name = doc.selectFirst("h1.anime-details-title").text;
-        const imageUrl = doc.selectFirst("div.anime-thumbnail img.thumbnail").getSrc;
-        const description = doc.selectFirst("p.anime-story").text;
+    
+        // FIX: Safely parse details to prevent crashes
+        const name = doc.selectFirst("h1.anime-details-title")?.text?.trim() ?? "";
+        const imageUrl = doc.selectFirst("div.anime-thumbnail img.thumbnail")?.getSrc ?? "";
+        const description = doc.selectFirst("p.anime-story")?.text?.trim() ?? "";
+        const link = url;
         const statusText = doc.selectFirst("div.anime-info:contains(حالة الأنمي) a")?.text ?? '';
         const status = { "يعرض الان": 0, "مكتمل": 1 }[statusText] ?? 5;
         const genre = doc.select("ul.anime-genres > li > a").map(e => e.text);
-        const chapters = doc.select(".episodes-card-title h3 a").map(element => ({
-            name: element.text.trim(),
-            url: element.getHref.replace(/^https?:\/\/[^\/]+/, '')
-        })).reverse();
-        return { name, imageUrl, description, link: url, status, genre, chapters };
+    
+        let chapters = [];
+        // FIX: Detect page type by inspecting the first link in the list
+        const firstItemLink = doc.selectFirst(".episodes-list-content .pinned-card a.badge.light-soft")?.getHref;
+
+        if (firstItemLink && firstItemLink.includes("/anime/")) {
+            // This is a multi-season page, links point to other anime pages
+            const seasonElements = doc.select(".episodes-list-content .pinned-card");
+            
+            const seasonPromises = seasonElements.map(async (element) => {
+                const seasonLink = element.selectFirst("a");
+                const seasonName = element.selectFirst("div.info h3")?.text.trim();
+                if (!seasonLink || !seasonName) return [];
+    
+                const seasonUrl = seasonLink.getHref;
+                const seasonRes = await this.client.get(seasonUrl, this.getHeaders(seasonUrl));
+                const seasonDoc = new Document(seasonRes.body);
+    
+                const seasonEpisodes = [];
+                const episodeElements = seasonDoc.select("div.episodes-list-content div.pinned-card a.badge.light-soft");
+                for (const epElement of episodeElements) {
+                    const episodeName = epElement.text.trim();
+                    seasonEpisodes.push({
+                        name: `${seasonName} - ${episodeName}`,
+                        url: epElement.getHref.replace(/^https?:\/\/[^\/]+/, '')
+                    });
+                }
+                return seasonEpisodes.reverse();
+            });
+    
+            const seasonsEpisodes = await Promise.all(seasonPromises);
+            chapters = seasonsEpisodes.flat();
+
+        } else if (firstItemLink && firstItemLink.includes("/episode/")) {
+            // This is a single-season page, links point to episodes
+            const episodeElements = doc.select("div.episodes-list-content div.pinned-card a.badge.light-soft");
+            for (const element of episodeElements) {
+                chapters.push({
+                    name: element.text.trim(),
+                    url: element.getHref.replace(/^https?:\/\/[^\/]+/, '')
+                });
+            }
+            chapters.reverse();
+        }
+    
+        return { name, imageUrl, description, link, status, genre, chapters };
     }
 
     // --- VIDEO EXTRACTION ---
@@ -178,25 +228,32 @@ class DefaultExtension extends MProvider {
             { key: 'krakenfiles',domains: ['krakenfiles'], func: this._krakenfilesExtractor, useQuality: true },
             { key: 'thetube',    domains: ['they.tube'], func: this._thetubeExtractor, useQuality: false },
         ];
-
-        for (const element of doc.select('#episode-servers li a')) {
+        
+        // FIX: Use correct selector for server items
+        for (const element of doc.select('#episode-servers > li')) {
             let streamUrl = null;
             let qualityPrefix = null;
             let serverNameText = null;
             try {
-                streamUrl = element.attr('data-ep-url');
+                // FIX: Get URL from 'data-watch' attribute
+                streamUrl = element.attr('data-watch');
                 if (!streamUrl) continue;
+
                 streamUrl = streamUrl.replace(/&amp;/g, '&');
                 if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
                 if (streamUrl.includes("vidmoly.to")) streamUrl = streamUrl.replace("vidmoly.to", "vidmoly.net");
+                
+                // FIX: Get server name from child 'a' tag
+                const qualityTextElement = element.selectFirst('a');
+                if (!qualityTextElement) continue;
 
-                const qualityText = element.text.trim();
+                const qualityText = qualityTextElement.text.trim();
                 const extractor = extractorMap.find(ext =>
                     hosterSelection.includes(ext.key) && ext.domains.some(d => streamUrl.toLowerCase().includes(d))
                 );
 
                 const numericQuality = this.getNumericQuality(qualityText);
-                serverNameText = qualityText.split(' - ')[0].trim();
+                serverNameText = qualityText.split(' ')[0].trim();
                 qualityPrefix = `${serverNameText} - ${numericQuality}`;
                 if (showEmbedUrl) {
                     qualityPrefix += ` [${streamUrl}]`;
@@ -253,7 +310,7 @@ class DefaultExtension extends MProvider {
     }
     
     // --- EXTRACTORS ---
-
+    // ... (All extractor functions remain unchanged as they were not part of the fix request)
     async _parseM3U8(playlistUrl, prefix, headers = {}) {
         const videos = [];
         videos.push({ url: playlistUrl, originalUrl: playlistUrl, quality: this._formatQuality(`${prefix} Auto (HLS)`, playlistUrl), headers });
