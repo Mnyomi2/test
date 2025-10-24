@@ -54,6 +54,7 @@ class DefaultExtension extends MProvider {
                 const name = linkElement.text.trim();
                 const link = linkElement.getHref.replace(/^https?:\/\/[^\/]+/, '');
                 
+                // Get the thumbnail URL directly from the 'data-image' attribute for faster loading.
                 const imageUrl = imageElement.attr('data-image');
                 
                 if (imageUrl) {
@@ -183,55 +184,33 @@ class DefaultExtension extends MProvider {
     }
 
     async getVideoList(url) {
-        const episodeUrl = this.getBaseUrl() + url;
-        const res = await this.client.get(episodeUrl, this.getHeaders(episodeUrl));
+        const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
         const doc = new Document(res.body);
-
-        const nonceMatch = res.body.match(/window\.TxPlayerNonce\s*=\s*"([^"]+)"/);
-        if (!nonceMatch) return [];
-        const nonce = nonceMatch[1];
-
-        const videos = [];
+        let videos = [];
         const hosterSelection = this.getPreference("hoster_selection") || ["Dood", "Voe", "Mp4upload", "Okru"];
-        const ajaxUrl = this.getBaseUrl() + "/wp-content/themes/Anime4up/Ajaxt/iframe.php";
+        const headers = this.getHeaders(this.getBaseUrl() + url);
 
         const linkElements = doc.select('#episode-servers li a');
         for (const element of linkElements) {
             try {
-                const postId = element.attr('data-id');
-                const nume = element.attr('data-i');
-                const type = element.attr('data-type');
+                let streamUrl = element.attr('data-ep-url');
+                const qualityText = element.text.trim();
+                const serverName = qualityText.split(' - ')[0];
 
-                if (!postId || !nume || !type) continue;
-
-                const payload = {
-                    'post': postId,
-                    'nume': nume,
-                    'type': type,
-                    '_ajax_nonce': nonce
-                };
-                
-                const postHeaders = this.getHeaders(episodeUrl);
-                postHeaders["X-Requested-With"] = "XMLHttpRequest";
-                
-                const ajaxRes = await this.client.post(ajaxUrl, payload, postHeaders);
-                const ajaxJson = JSON.parse(ajaxRes.body);
-
-                let streamUrl = ajaxJson.embed_url;
-                if (!streamUrl) continue;
                 if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
 
-                const qualityText = element.text.trim();
-                const serverName = qualityText.split(' - ')[0].trim();
                 const numericQuality = this.getNumericQuality(qualityText);
                 const finalQualityString = `${serverName} - ${numericQuality}`;
-                
-                if (serverName.toLowerCase().includes("mp4upload") && hosterSelection.includes("Mp4upload")) {
-                    videos.push(...(await this.mp4uploadExtractor(streamUrl, finalQualityString)));
-                } else if (hosterSelection.some(h => serverName.toLowerCase().includes(h.toLowerCase()))) {
-                    videos.push({ url: streamUrl, quality: finalQualityString, headers: { "Referer": streamUrl } });
-                }
 
+                if (serverName.includes("Mp4upload") && hosterSelection.includes("Mp4upload")) {
+                    videos.push(...(await this.mp4uploadExtractor(streamUrl, finalQualityString)));
+                } else if (serverName.includes("Dood") && hosterSelection.includes("Dood")) {
+                    videos.push({ url: streamUrl, quality: finalQualityString, headers });
+                } else if (serverName.includes("Ok.ru") && hosterSelection.includes("Okru")) {
+                    videos.push({ url: streamUrl, quality: finalQualityString, headers });
+                } else if (serverName.includes("Voe.sx") && hosterSelection.includes("Voe")) {
+                    videos.push({ url: streamUrl, quality: finalQualityString, headers });
+                }
             } catch (e) { /* Ignore errors from single hoster */ }
         }
 
