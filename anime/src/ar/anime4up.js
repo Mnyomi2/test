@@ -348,7 +348,7 @@ class DefaultExtension extends MProvider {
             listPreference: {
                 title: "الجودة المفضلة",
                 summary: "اختر الجودة التي سيتم اختيارها تلقائيا",
-                valueIndex: 1,
+                valueIndex: 0,
                 entries: ["1080p", "720p", "480p", "360p"],
                 entryValues: ["1080", "720", "480", "360"],
             }
