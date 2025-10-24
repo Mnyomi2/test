@@ -8,7 +8,6 @@ const mangayomiSources = [{
     "typeSource": "single",
     "itemType": 1,
     "version": "1.5.5",
-    "hasCloudflare": true,
     "pkgPath": "anime/src/ar/anime4up.js"
 }];
 
@@ -45,29 +44,24 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
 
         const list = [];
-        const items = doc.select("div.anime-card-themex");
+        const items = doc.select(".anime-card-container, div.row.posts-row article");
 
         for (const item of items) {
-            const linkElement = item.selectFirst("div.anime-card-title h3 a");
-            const imageElement = item.selectFirst("img");
+            const linkElement = item.selectFirst("div.anime-card-title h3 a, h3.post-title a");
+            const imageElement = item.selectFirst("img.img-responsive");
 
             if (linkElement && imageElement) {
                 const name = linkElement.text.trim();
                 const link = linkElement.getHref.replace(/^https?:\/\/[^\/]+/, '');
-                
-                // Get the thumbnail URL directly from the 'data-image' attribute for faster loading.
-                const imageUrl = imageElement.attr('data-image');
-                
-                if (imageUrl) {
-                    list.push({ name, imageUrl, link });
-                }
+                const imageUrl = imageElement.getSrc;
+                list.push({ name, imageUrl, link });
             }
         }
 
+        // This selector works for both text search and filter page pagination buttons.
         const hasNextPage = doc.selectFirst("ul.pagination li a[href*='page='], a.next.page-numbers") != null;
         return { list, hasNextPage };
     }
-
 
     getNumericQuality(quality) {
         const q = quality.toLowerCase();
@@ -153,7 +147,7 @@ class DefaultExtension extends MProvider {
         const genre = doc.select("ul.anime-genres > li > a").map(e => e.text);
 
         const chapters = [];
-        const episodeElements = doc.select("div.episodes-list-content div.pinned-card a.badge.light-soft");
+        const episodeElements = doc.select(".episodes-card-title h3 a");
         for (const element of episodeElements) {
             chapters.push({
                 name: element.text.trim(),
