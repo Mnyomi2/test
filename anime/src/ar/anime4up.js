@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=ww.anime4up.rest",
     "typeSource": "single",
     "itemType": 1,
-    "version": "1.5.6",
+    "version": "1.5.5",
     "pkgPath": "anime/src/ar/anime4up.js"
 }];
 
@@ -149,10 +149,10 @@ class DefaultExtension extends MProvider {
         const genre = doc.select("ul.anime-genres > li > a").map(e => e.text);
     
         let chapters = [];
-        const seasonHeader = doc.selectFirst("div.main-didget-head h3:contains(مواسم)");
-    
-        if (seasonHeader) {
-            // Multi-season page: Fetch episodes from each season listed.
+        const firstItemLink = doc.selectFirst(".episodes-list-content .pinned-card a.badge.light-soft")?.getHref;
+
+        if (firstItemLink && firstItemLink.includes("/anime/")) {
+            // Multi-season page: Link contains /anime/, indicating it's a season link.
             const seasonElements = doc.select(".episodes-list-content .pinned-card");
             
             const seasonPromises = seasonElements.map(async (element) => {
@@ -173,14 +173,14 @@ class DefaultExtension extends MProvider {
                         url: epElement.getHref.replace(/^https?:\/\/[^\/]+/, '')
                     });
                 }
-                return seasonEpisodes.reverse();
+                return seasonEpisodes.reverse(); // Chronological order for episodes within this season
             });
     
             const seasonsEpisodes = await Promise.all(seasonPromises);
-            chapters = seasonsEpisodes.flat();
-    
-        } else {
-            // Single-season page (with 'حلقات' header): Fetch episodes directly.
+            chapters = seasonsEpisodes.flat(); // Combine all seasons' episodes
+
+        } else if (firstItemLink && firstItemLink.includes("/episode/")) {
+            // Single-season page: Link contains /episode/, indicating it's an episode list.
             const episodeElements = doc.select("div.episodes-list-content div.pinned-card a.badge.light-soft");
             for (const element of episodeElements) {
                 chapters.push({
@@ -188,7 +188,7 @@ class DefaultExtension extends MProvider {
                     url: element.getHref.replace(/^https?:\/\/[^\/]+/, '')
                 });
             }
-            chapters.reverse();
+            chapters.reverse(); // Chronological order for all episodes
         }
     
         return { name, imageUrl, description, link, status, genre, chapters };
