@@ -21,6 +21,28 @@
         "sourceCodeLanguage": 1,
         "notes": ""
     },
+        {
+        "name": "Anime4up",
+        "id": 8374956845,
+        "baseUrl": "https://ww.anime4up.rest",
+        "lang": "ar",
+        "typeSource": "single",
+        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=ww.anime4up.rest",
+        "dateFormat": "",
+        "dateFormatLocale": "",
+        "isNsfw": false,
+        "hasCloudflare": false,
+        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/anime4up.js",
+        "apiUrl": "",
+        "version": "1.5.6",
+        "isManga": false,
+        "itemType": 1,
+        "isFullData": false,
+        "appMinVerReq": "0.5.0",
+        "additionalParams": "",
+        "sourceCodeLanguage": 1,
+        "notes": ""
+    },
     {
         "name": "JavGG",
         "id": 960105109,
@@ -145,28 +167,6 @@
         "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/akwam.js",
         "apiUrl": "",
         "version": "1.0.8",
-        "isManga": false,
-        "itemType": 1,
-        "isFullData": false,
-        "appMinVerReq": "0.5.0",
-        "additionalParams": "",
-        "sourceCodeLanguage": 1,
-        "notes": ""
-    },
-    {
-        "name": "Anime4up",
-        "id": 8374956845,
-        "baseUrl": "https://ww.anime4up.rest",
-        "lang": "ar",
-        "typeSource": "single",
-        "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=ww.anime4up.rest",
-        "dateFormat": "",
-        "dateFormatLocale": "",
-        "isNsfw": false,
-        "hasCloudflare": false,
-        "sourceCodeUrl": "https://raw.githubusercontent.com/Mnyomi2/test/refs/heads/main/anime/src/ar/anime4up.js",
-        "apiUrl": "",
-        "version": "1.5.5",
         "isManga": false,
         "itemType": 1,
         "isFullData": false,
@@ -813,4 +813,5 @@
         "sourceCodeLanguage": 1,
         "notes": ""
     }
+
 ]
