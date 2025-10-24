@@ -42,26 +42,63 @@ class DefaultExtension extends MProvider {
         const url = this.getBaseUrl() + path;
         const res = await this.client.get(url, this.getHeaders(url));
         const doc = new Document(res.body);
-
-        const list = [];
-        const items = doc.select("div.anime-card-themex");
-
-        for (const item of items) {
-            const linkElement = item.selectFirst("div.anime-card-title h3 a");
-            const imageElement = item.selectFirst("img");
-
-            if (linkElement && imageElement) {
-                const name = linkElement.text.trim();
-                const link = linkElement.getHref.replace(/^https?:\/\/[^\/]+/, '');
+    
+        const items = doc.select("div.anime-card-themex, div.row.posts-row article");
+        const promises = items.map(async (item) => {
+            if (item.is("div.anime-card-themex")) {
+                const linkElement = item.selectFirst("div.anime-card-title h3 a");
+                if (!linkElement) return [];
                 
-                const imageUrl = imageElement.attr('data-image');
-                
-                if (imageUrl) {
-                    list.push({ name, imageUrl, link });
+                const itemUrl = linkElement.getHref;
+                try {
+                    const itemRes = await this.client.get(itemUrl, this.getHeaders(itemUrl));
+                    const itemDoc = new Document(itemRes.body);
+    
+                    const seasonHeader = itemDoc.selectFirst("div.main-didget-head h3:contains(مواسم)");
+                    if (seasonHeader) {
+                        const seasonElements = itemDoc.select(".episodes-list-content .themexblock .pinned-card");
+                        return seasonElements.map(seasonElement => {
+                            const seasonLinkElement = seasonElement.selectFirst("a");
+                            const seasonNameElement = seasonElement.selectFirst("h3");
+                            const style = seasonLinkElement.attr("style");
+                            const imageUrlMatch = style.match(/url\(['"]?(.*?)['"]?\)/);
+                            const imageUrl = imageUrlMatch ? imageUrlMatch[1] : '';
+    
+                            return {
+                                name: seasonNameElement.text.trim(),
+                                imageUrl: imageUrl,
+                                link: seasonLinkElement.getHref.replace(/^https?:\/\/[^\/]+/, '')
+                            };
+                        }).filter(s => s.name && s.link);
+                    } else {
+                        const imageElement = item.selectFirst("img");
+                        return [{
+                            name: linkElement.text.trim(),
+                            imageUrl: imageElement.attr('data-image'),
+                            link: linkElement.getHref.replace(/^https?:\/\/[^\/]+/, '')
+                        }];
+                    }
+                } catch (e) {
+                    return [];
                 }
+            } else if (item.is("article")) {
+                 const linkElement = item.selectFirst("h3.post-title a");
+                 const imageElement = item.selectFirst("img");
+                 if (linkElement && imageElement) {
+                    return [{
+                        name: linkElement.text.trim(),
+                        imageUrl: imageElement.getSrc,
+                        link: linkElement.getHref 
+                    }];
+                 }
+                 return [];
             }
-        }
-
+            return [];
+        });
+    
+        const results = await Promise.all(promises);
+        const list = results.flat();
+    
         const hasNextPage = doc.selectFirst("ul.pagination li a[href*='page='], a.next.page-numbers") != null;
         return { list, hasNextPage };
     }
@@ -85,14 +122,15 @@ class DefaultExtension extends MProvider {
     async getLatestUpdates(page) {
         const path = `/episode/page/${page}/`;
         const result = await this.fetchAndParseCataloguePage(path);
-
+    
         const fixedList = result.list.map(item => ({
             ...item,
             link: item.link
+                .replace(/^https?:\/\/[^\/]+/, '')
                 .replace(/-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-.*$/, "")
                 .replace("/episode/", "/anime/")
         }));
-
+    
         return { list: fixedList, hasNextPage: result.hasNextPage };
     }
 
@@ -144,52 +182,21 @@ class DefaultExtension extends MProvider {
         const imageUrl = doc.selectFirst("div.anime-thumbnail img.thumbnail").getSrc;
         const description = doc.selectFirst("p.anime-story").text;
         const link = url;
+    
         const statusText = doc.selectFirst("div.anime-info:contains(حالة الأنمي) a")?.text ?? '';
         const status = { "يعرض الان": 0, "مكتمل": 1 }[statusText] ?? 5;
+    
         const genre = doc.select("ul.anime-genres > li > a").map(e => e.text);
     
-        let chapters = [];
-        const seasonHeader = doc.selectFirst("div.main-didget-head h3:contains(مواسم)");
-    
-        if (seasonHeader) {
-            // This is a seasons list page. Fetch episodes from each season.
-            const seasonElements = doc.select(".episodes-list-content .themexblock .pinned-card");
-            
-            const seasonPromises = seasonElements.map(async (element) => {
-                const seasonLink = element.selectFirst("a");
-                const seasonName = element.selectFirst("h3")?.text.trim();
-                if (!seasonLink || !seasonName) return [];
-    
-                const seasonUrl = seasonLink.getHref;
-                const seasonRes = await this.client.get(seasonUrl, this.getHeaders(seasonUrl));
-                const seasonDoc = new Document(seasonRes.body);
-    
-                const seasonEpisodes = [];
-                const episodeElements = seasonDoc.select("div.episodes-list-content div.pinned-card a.badge.light-soft");
-                for (const epElement of episodeElements) {
-                    const episodeName = epElement.text.trim();
-                    seasonEpisodes.push({
-                        name: `${seasonName} - ${episodeName}`,
-                        url: epElement.getHref.replace(/^https?:\/\/[^\/]+/, '')
-                    });
-                }
-                return seasonEpisodes.reverse(); // Chronological order for this season's episodes
+        const chapters = [];
+        const episodeElements = doc.select("div.episodes-list-content div.pinned-card a.badge.light-soft");
+        for (const element of episodeElements) {
+            chapters.push({
+                name: element.text.trim(),
+                url: element.getHref.replace(/^https?:\/\/[^\/]+/, '')
             });
-    
-            const seasonsEpisodes = await Promise.all(seasonPromises);
-            chapters = seasonsEpisodes.flat(); // Combine all seasons' episodes
-    
-        } else {
-            // This is a standard single-season page.
-            const episodeElements = doc.select("div.episodes-list-content div.pinned-card a.badge.light-soft");
-            for (const element of episodeElements) {
-                chapters.push({
-                    name: element.text.trim(),
-                    url: element.getHref.replace(/^https?:\/\/[^\/]+/, '')
-                });
-            }
-            chapters.reverse(); // Chronological order for episodes
         }
+        chapters.reverse();
     
         return { name, imageUrl, description, link, status, genre, chapters };
     }
@@ -264,7 +271,7 @@ class DefaultExtension extends MProvider {
         const sections = [
             { name: 'الكل', value: '' },
             { name: 'الانمي المترجم', value: getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%aa%d8%b1%d8%ac%d9%85/')},
-            { name: 'الانمي المدبلج', value: getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%AF%d8%a8%d9%84%d8%ac/')}
+            { name: 'الانمي المدبلج', value: getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%af%d8%a8%d9%84%d8%ac/')}
         ].map(s => ({ type_name: "SelectOption", name: s.name, value: s.value }));
 
         const genres = [
