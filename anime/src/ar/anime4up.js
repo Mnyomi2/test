@@ -7,7 +7,7 @@ const mangayomiSources = [{
     "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=ww.anime4up.rest",
     "typeSource": "single",
     "itemType": 1,
-    "version": "1.5.5",
+    "version": "1.5.6",
     "pkgPath": "anime/src/ar/anime4up.js"
 }];
 
@@ -89,7 +89,7 @@ class DefaultExtension extends MProvider {
         const fixedList = result.list.map(item => ({
             ...item,
             link: item.link
-                .replace(/-%d8%a7%d9%84%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-.*$/, "")
+                .replace(/-%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-.*$/, "")
                 .replace("/episode/", "/anime/")
         }));
 
@@ -140,7 +140,6 @@ class DefaultExtension extends MProvider {
         const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
         const doc = new Document(res.body);
     
-        // Safely parse main details to prevent crashes on unexpected page structures.
         const name = doc.selectFirst("h1.anime-details-title")?.text?.trim() ?? "";
         const imageUrl = doc.selectFirst("div.anime-thumbnail img.thumbnail")?.getSrc ?? "";
         const description = doc.selectFirst("p.anime-story")?.text?.trim() ?? "";
@@ -154,11 +153,11 @@ class DefaultExtension extends MProvider {
     
         if (seasonHeader) {
             // Multi-season page: Fetch episodes from each season listed.
-            const seasonElements = doc.select(".episodes-list-content .themexblock .pinned-card");
+            const seasonElements = doc.select(".episodes-list-content .pinned-card");
             
             const seasonPromises = seasonElements.map(async (element) => {
                 const seasonLink = element.selectFirst("a");
-                const seasonName = element.selectFirst("h3")?.text.trim();
+                const seasonName = element.selectFirst("div.info h3")?.text.trim();
                 if (!seasonLink || !seasonName) return [];
     
                 const seasonUrl = seasonLink.getHref;
@@ -181,7 +180,7 @@ class DefaultExtension extends MProvider {
             chapters = seasonsEpisodes.flat();
     
         } else {
-            // Standard single-season page: Fetch episodes directly.
+            // Single-season page (with 'حلقات' header): Fetch episodes directly.
             const episodeElements = doc.select("div.episodes-list-content div.pinned-card a.badge.light-soft");
             for (const element of episodeElements) {
                 chapters.push({
