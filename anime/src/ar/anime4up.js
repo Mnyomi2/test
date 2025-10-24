@@ -8,6 +8,7 @@ const mangayomiSources = [{
     "typeSource": "single",
     "itemType": 1,
     "version": "1.5.5",
+    "hasCloudflare": true,
     "pkgPath": "anime/src/ar/anime4up.js"
 }];
 
