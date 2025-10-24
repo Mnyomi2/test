@@ -220,25 +220,34 @@ class DefaultExtension extends MProvider {
         const hosterSelection = this.getPreference("hoster_selection") || ["Dood", "Voe", "Mp4upload", "Okru"];
         const headers = this.getHeaders(this.getBaseUrl() + url);
 
-        const linkElements = doc.select('#episode-servers li a');
+        // Select each server item from the list.
+        const linkElements = doc.select('#episode-servers > li');
         for (const element of linkElements) {
             try {
-                let streamUrl = element.attr('data-ep-url');
-                const qualityText = element.text.trim();
-                const serverName = qualityText.split(' - ')[0];
+                // The video URL is in the 'data-watch' attribute of the <li> element.
+                let streamUrl = element.attr('data-watch');
+                if (!streamUrl) continue;
 
+                const qualityTextElement = element.selectFirst('a');
+                if (!qualityTextElement) continue;
+
+                // The server name and quality are inside the <a> tag.
+                const qualityText = qualityTextElement.text.trim();
+                const serverName = qualityText.split(' ')[0].toLowerCase();
+                
                 if (streamUrl.startsWith("//")) streamUrl = "https:" + streamUrl;
 
                 const numericQuality = this.getNumericQuality(qualityText);
                 const finalQualityString = `${serverName} - ${numericQuality}`;
 
-                if (serverName.includes("Mp4upload") && hosterSelection.includes("Mp4upload")) {
+                // Use case-insensitive matching for server names.
+                if (serverName.includes("mp4upload") && hosterSelection.includes("Mp4upload")) {
                     videos.push(...(await this.mp4uploadExtractor(streamUrl, finalQualityString)));
-                } else if (serverName.includes("Dood") && hosterSelection.includes("Dood")) {
+                } else if (serverName.includes("dood") && hosterSelection.includes("Dood")) {
                     videos.push({ url: streamUrl, quality: finalQualityString, headers });
-                } else if (serverName.includes("Ok.ru") && hosterSelection.includes("Okru")) {
+                } else if (serverName.includes("ok.ru") && hosterSelection.includes("Okru")) {
                     videos.push({ url: streamUrl, quality: finalQualityString, headers });
-                } else if (serverName.includes("Voe.sx") && hosterSelection.includes("Voe")) {
+                } else if (serverName.includes("voe") && hosterSelection.includes("Voe")) {
                     videos.push({ url: streamUrl, quality: finalQualityString, headers });
                 }
             } catch (e) { /* Ignore errors from single hoster */ }
@@ -264,7 +273,7 @@ class DefaultExtension extends MProvider {
         const sections = [
             { name: 'الكل', value: '' },
             { name: 'الانمي المترجم', value: getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%aa%d8%b1%d8%ac%d9%85/')},
-            { name: 'الانمي المدبلج', value: getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%af%d8%a8%d9%84%d8%ac/')}
+            { name: 'الانمي المدبلج', value: getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%af%d8%a8%d9%84%d8%ag/')}
         ].map(s => ({ type_name: "SelectOption", name: s.name, value: s.value }));
 
         const genres = [
