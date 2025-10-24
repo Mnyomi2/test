@@ -54,7 +54,6 @@ class DefaultExtension extends MProvider {
                 const name = linkElement.text.trim();
                 const link = linkElement.getHref.replace(/^https?:\/\/[^\/]+/, '');
                 
-                // Get the thumbnail URL directly from the 'data-image' attribute for faster loading.
                 const imageUrl = imageElement.attr('data-image');
                 
                 if (imageUrl) {
@@ -138,9 +137,24 @@ class DefaultExtension extends MProvider {
     }
 
     async getDetail(url) {
-        const res = await this.client.get(this.getBaseUrl() + url, this.getHeaders(this.getBaseUrl() + url));
-        const doc = new Document(res.body);
+        let responseUrl = this.getBaseUrl() + url;
+        let res = await this.client.get(responseUrl, this.getHeaders(responseUrl));
+        let doc = new Document(res.body);
 
+        // Check if the current page is a list of seasons.
+        const seasonHeader = doc.selectFirst("div.main-didget-head h3:contains(مواسم)");
+        if (seasonHeader) {
+            // If it is a seasons page, get the URL of the first season in the list.
+            const firstSeasonElement = doc.selectFirst(".episodes-list-content .pinned-card a");
+            if (firstSeasonElement) {
+                const firstSeasonUrl = firstSeasonElement.getHref;
+                // Fetch the details page of the first season instead.
+                res = await this.client.get(firstSeasonUrl, this.getHeaders(firstSeasonUrl));
+                doc = new Document(res.body);
+            }
+        }
+
+        // Continue parsing, now with the correct details page document.
         const name = doc.selectFirst("h1.anime-details-title").text;
         const imageUrl = doc.selectFirst("div.anime-thumbnail img.thumbnail").getSrc;
         const description = doc.selectFirst("p.anime-story").text;
