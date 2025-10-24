@@ -152,7 +152,7 @@ class DefaultExtension extends MProvider {
         const seasonHeader = doc.selectFirst("div.main-didget-head h3:contains(مواسم)");
     
         if (seasonHeader) {
-            // This is a seasons list page. Fetch episodes from each season.
+            // Multi-season page: Fetch episodes from each season.
             const seasonElements = doc.select(".episodes-list-content .themexblock .pinned-card");
             
             const seasonPromises = seasonElements.map(async (element) => {
@@ -173,14 +173,14 @@ class DefaultExtension extends MProvider {
                         url: epElement.getHref.replace(/^https?:\/\/[^\/]+/, '')
                     });
                 }
-                return seasonEpisodes.reverse(); // Chronological order for this season's episodes
+                return seasonEpisodes.reverse();
             });
     
             const seasonsEpisodes = await Promise.all(seasonPromises);
-            chapters = seasonsEpisodes.flat(); // Combine all seasons' episodes
+            chapters = seasonsEpisodes.flat();
     
         } else {
-            // This is a standard single-season page.
+            // Single-season page: Parse episodes directly.
             const episodeElements = doc.select("div.episodes-list-content div.pinned-card a.badge.light-soft");
             for (const element of episodeElements) {
                 chapters.push({
@@ -188,7 +188,7 @@ class DefaultExtension extends MProvider {
                     url: element.getHref.replace(/^https?:\/\/[^\/]+/, '')
                 });
             }
-            chapters.reverse(); // Chronological order for episodes
+            chapters.reverse();
         }
     
         return { name, imageUrl, description, link, status, genre, chapters };
@@ -264,7 +264,7 @@ class DefaultExtension extends MProvider {
         const sections = [
             { name: 'الكل', value: '' },
             { name: 'الانمي المترجم', value: getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%aa%d8%b1%d8%ac%d9%85/')},
-            { name: 'الانمي المدبلج', value: getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%AF%d8%a8%d9%84%d8%ac/')}
+            { name: 'الانمي المدبلج', value: getSlug('https://ww.anime4up.rest/anime-category/%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a-%d8%a7%d9%84%d9%85%d8%af%d8%a8%d9%84%d8%ac/')}
         ].map(s => ({ type_name: "SelectOption", name: s.name, value: s.value }));
 
         const genres = [
