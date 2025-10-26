@@ -1,12 +1,13 @@
 const mangayomiSources = [{
     "name": "Topcinema",
     "id": 645835682,
-    "baseUrl": "https://web6.topcinema.cam",
+    "baseUrl": "https://web7.topcinema.cam",
     "lang": "ar",
     "typeSource": "single",
-    "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://web6.topcinema.cam",
+    "iconUrl": "https://www.google.com/s2/favicons?sz=128&domain=https://web7.topcinema.cam",
     "itemType": 1,
     "version": "1.0.2",
+	"hasCloudflare": true,
     "pkgPath": "anime/src/ar/topcinema.js",
 }];
 
@@ -45,7 +46,8 @@ class DefaultExtension extends MProvider {
 
     // --- BASIC BROWSE/DETAIL METHODS ---
     async requestDoc(path, headers = {}) {
-        const url = this.source.baseUrl + path;
+        // FIX: Handle both absolute and relative paths correctly.
+        const url = path.startsWith("http") ? path : this.source.baseUrl + path;
         const res = await this.client.get(url, this.getHeaders(url));
         return new Document(res.body);
     }
